@@ -14,14 +14,14 @@
     "migrate:local": "wrangler d1 migrations apply tools_db --local",
     "seed:generate": "node scripts/generate-seed.mjs > seed/dev-seed.sql",
     "seed:local": "wrangler d1 execute tools_db --local --file=seed/dev-seed.sql",
-    "db:reset": "npm run migrate:local && npm run seed:local"
+    "db:reset": "npm run migrate:local && npm run seed:local",
+    "test:e2e": "node tests/e2e/smoke.mjs"
   },
   "dependencies": {
     "hono": "^4.13.8",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-router-dom": "^7.18.4",
-    "recharts": "^3.10.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {
@@ -32,6 +32,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "better-sqlite3": "^13.0.3",
     "concurrently": "^10.0.5",
+    "playwright": "^1.63.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.0",
     "vitest": "^5.0.1",

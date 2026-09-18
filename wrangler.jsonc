@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "internal-tools-dashboard",
+  "main": "src/server/index.ts",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./dist/client",
+    "not_found_handling": "single-page-application"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tools_db",
+      // Placeholder: a real id is only needed when we lift the deploy hold.
+      "database_id": "local-development-only"
+    }
+  ],
+  "triggers": {
+    // 03:00 UTC == 08:30 IST. Only fires once deployed; locally we invoke
+    // the same handler by hand via `wrangler dev` or the dry-run endpoint.
+    "crons": ["0 3 * * *"]
+  },
+  "vars": {
+    "FEATURE_DOCUMENTS": "false",
+    "APP_ENV": "development"
+  }
+}

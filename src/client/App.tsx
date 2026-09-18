@@ -148,6 +148,13 @@ export default function App() {
               <h1>{title}</h1>
               {subtitle ? <div className="subtitle">{subtitle}</div> : null}
             </div>
+            {api.isDemo ? (
+              <div className="topbar-meta">
+                <span className="badge warning" title="Edits are kept in memory only">
+                  Demo · edits reset on reload
+                </span>
+              </div>
+            ) : null}
           </header>
 
           <main className="content">

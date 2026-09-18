@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { api } from '../lib/api';
+import { api, ApiError } from '../lib/api';
 import { useAsync, useDebounced } from '../lib/hooks';
-import { Banner, EmptyState, Loading, StatusBadge } from '../components/ui';
+import { Banner, EmptyState, Loading, StatusBadge, useToast } from '../components/ui';
 import { SeatMeter } from '../components/Charts';
 import { formatMoney, annualisedCost } from '../../shared/money';
 import { formatDate, daysBetween, relativeDays } from '../../shared/dates';
@@ -20,7 +20,17 @@ const CYCLE_LABEL: Record<string, string> = {
 
 export default function Tools() {
   const navigate = useNavigate();
+  const toast = useToast();
   const [search, setSearch] = useState('');
+
+  async function exportCsv() {
+    try {
+      await api.downloadCsv('tools');
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not build that file.', 'error');
+    }
+  }
+
   const [category, setCategory] = useState('');
   const [owner, setOwner] = useState('');
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -129,9 +139,9 @@ export default function Tools() {
         </label>
 
         <span className="spacer" />
-        <a className="btn" href="/api/export/tools.csv" download>
+        <button type="button" className="btn" onClick={() => exportCsv()}>
           Export CSV
-        </a>
+        </button>
         <Link className="btn primary" to="/tools/new">
           Add tool
         </Link>

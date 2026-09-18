@@ -18,6 +18,14 @@ type View = 'outstanding' | 'paid' | 'all';
  */
 export default function Payments() {
   const toast = useToast();
+
+  async function exportCsv() {
+    try {
+      await api.downloadCsv('payments');
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not build that file.', 'error');
+    }
+  }
   const [view, setView] = useState<View>('outstanding');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -117,9 +125,9 @@ export default function Payments() {
             Mark {selected.size} paid
           </button>
         ) : null}
-        <a className="btn" href="/api/export/payments.csv" download>
+        <button type="button" className="btn" onClick={() => exportCsv()}>
           Export CSV
-        </a>
+        </button>
       </div>
 
       {error ? <Banner tone="critical">{error}</Banner> : null}

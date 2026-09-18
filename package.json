@@ -15,7 +15,9 @@
     "seed:generate": "node scripts/generate-seed.mjs > seed/dev-seed.sql",
     "seed:local": "wrangler d1 execute tools_db --local --file=seed/dev-seed.sql",
     "db:reset": "npm run migrate:local && npm run seed:local",
-    "test:e2e": "node tests/e2e/smoke.mjs"
+    "test:e2e": "node tests/e2e/smoke.mjs",
+    "build:demo": "vite build --config vite.demo.config.ts",
+    "demo:data": "node scripts/build-demo-data.mjs > src/client/demo/data.json"
   },
   "dependencies": {
     "hono": "^4.13.8",

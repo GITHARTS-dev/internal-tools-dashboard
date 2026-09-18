@@ -346,6 +346,14 @@ function DryRunPanel() {
  */
 function ImportPanel({ onDone }: { onDone: () => void }) {
   const toast = useToast();
+
+  async function downloadTemplate() {
+    try {
+      await api.downloadCsv('template');
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not build that file.', 'error');
+    }
+  }
   const [csv, setCsv] = useState('');
   const [result, setResult] = useState<ImportResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -381,9 +389,14 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
     <section className="card">
       <div className="card-head">
         <h2>Import from a spreadsheet</h2>
-        <a className="hint" href="/api/export/template.csv" download style={{ color: 'var(--series-1)' }}>
+        <button
+          type="button"
+          className="btn sm"
+          style={{ marginLeft: 'auto' }}
+          onClick={() => downloadTemplate()}
+        >
           Download template
-        </a>
+        </button>
       </div>
       <p className="card-sub">
         Rows are matched to existing tools by name, so re-importing an edited export updates in

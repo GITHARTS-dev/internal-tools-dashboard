@@ -7,11 +7,14 @@
     "dev": "concurrently -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "wrangler dev --port 8787",
     "dev:web": "vite",
-    "build": "tsc -b && vite build",
-    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly false",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "migrate:local": "wrangler d1 migrations apply tools_db --local"
+    "migrate:local": "wrangler d1 migrations apply tools_db --local",
+    "seed:generate": "node scripts/generate-seed.mjs > seed/dev-seed.sql",
+    "seed:local": "wrangler d1 execute tools_db --local --file=seed/dev-seed.sql",
+    "db:reset": "npm run migrate:local && npm run seed:local"
   },
   "dependencies": {
     "hono": "^4.13.8",

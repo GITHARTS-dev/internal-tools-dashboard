@@ -22,8 +22,7 @@
       "@shared/*": ["./src/shared/*"],
       "@server/*": ["./src/server/*"],
       "@client/*": ["./src/client/*"]
-    },
-    "baseUrl": "."
+    }
   },
   "include": ["src", "tests", "vite.config.ts", "vitest.config.ts"]
 }

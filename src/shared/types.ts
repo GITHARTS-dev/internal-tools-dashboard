@@ -205,3 +205,11 @@ export interface DashboardData {
   category_spend: CategorySpend[];
   renewal_timeline: RenewalTimelineEntry[];
 }
+
+/** How much is stored, and how much of it is the built-in demo data. */
+export interface DataStatus {
+  tools: number;
+  payments: number;
+  demo_tools: number;
+  own_tools: number;
+}

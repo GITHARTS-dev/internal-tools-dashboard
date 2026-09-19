@@ -265,6 +265,16 @@ function payment(tool, dueDate, status, paidOn, amount) {
   lines.push(`INSERT INTO payments (${paymentCols.join(', ')}) VALUES (${values.join(', ')});`);
 }
 
+// The current, unsettled state -- what the dashboard needs to shout about.
+const openPayments = [
+  ['seed-m365', '2026-09-01'], // overdue by 17 days
+  ['seed-zoom', '2026-09-25'], // due in a week
+  ['seed-clockify', '2026-10-01'],
+  ['seed-github', '2026-10-08'],
+  ['seed-canva', '2026-10-10'],
+];
+const isOpen = (tool, due) => openPayments.some(([id, d]) => id === tool.id && d === due);
+
 for (const tool of tools) {
   if (!tool.history || tool.cost_amount === null) continue;
   const months = cycleMonths[tool.billing_cycle] ?? 1;
@@ -273,27 +283,19 @@ for (const tool of tools) {
   for (let i = tool.history; i >= 1; i--) {
     const due = addMonths(tool.renewal_date, -i * months);
     if (tool.cancelled_on && due > tool.cancelled_on) continue;
+    // A period that is still open must not also appear as paid, or it shows up
+    // twice and marking one row paid appears to change nothing.
+    if (isOpen(tool, due)) continue;
     // Bills are usually settled a few days before they are due.
     const paidOn = addMonths(due, 0);
     payment(tool, due, 'paid', paidOn, tool.cost_amount);
   }
 }
 
-// The current, unsettled state -- what the dashboard needs to shout about.
-const m365 = tools.find((t) => t.id === 'seed-m365');
-payment(m365, '2026-09-01', 'due', null, m365.cost_amount); // overdue by 17 days
-
-const zoom = tools.find((t) => t.id === 'seed-zoom');
-payment(zoom, '2026-09-25', 'due', null, zoom.cost_amount); // due in a week
-
-const clockify = tools.find((t) => t.id === 'seed-clockify');
-payment(clockify, '2026-10-01', 'due', null, clockify.cost_amount);
-
-const github = tools.find((t) => t.id === 'seed-github');
-payment(github, '2026-10-08', 'due', null, github.cost_amount);
-
-const canva = tools.find((t) => t.id === 'seed-canva');
-payment(canva, '2026-10-10', 'due', null, canva.cost_amount);
+for (const [id, due] of openPayments) {
+  const tool = tools.find((t) => t.id === id);
+  payment(tool, due, 'due', null, tool.cost_amount);
+}
 
 lines.push('');
 lines.push(

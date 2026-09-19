@@ -24,7 +24,14 @@ import { advanceByCycle } from '../../shared/dates';
 import { parseCsv, toCsv } from '../../shared/csv';
 import { parseMoneyInput, toDecimalString } from '../../shared/money';
 import { toolCreateSchema, toolUpdateSchema } from '../../shared/schema';
-import { DEFAULT_SETTINGS, type AppSettings, type AuditEntry, type Payment, type Tool } from '../../shared/types';
+import {
+  DEFAULT_SETTINGS,
+  type AppSettings,
+  type AuditEntry,
+  type DataStatus,
+  type Payment,
+  type Tool,
+} from '../../shared/types';
 import { ApiError } from '../lib/errors';
 
 export const DEMO_TODAY = '2026-09-18';
@@ -122,6 +129,19 @@ function download(filename: string, contents: string): void {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+const isDemoId = (id: string) => id.startsWith('seed-');
+
+function dataStatus(): DataStatus {
+  const demo = tools.filter((t) => isDemoId(t.id)).length;
+  return { tools: tools.length, payments: payments.length, demo_tools: demo, own_tools: tools.length - demo };
+}
+
+function dropDemoRows(): void {
+  tools = tools.filter((t) => !isDemoId(t.id));
+  payments = payments.filter((p) => !isDemoId(p.tool_id));
+  audit = audit.filter((a) => !isDemoId(a.id) && !isDemoId(a.entity_id));
 }
 
 const TOOL_CSV_COLUMNS = [
@@ -413,6 +433,33 @@ export const demoApi = {
 
   async runReminders() {
     return this.dryRun();
+  },
+
+  async dataStatus() {
+    return reply({ status: dataStatus(), enabled: true });
+  },
+
+  async loadDemoData() {
+    dropDemoRows();
+    tools = [...tools, ...structuredClone(source.tools)];
+    payments = [...payments, ...structuredClone(source.payments)];
+    audit = [...structuredClone(source.audit), ...audit];
+    record('data', 'demo', 'create', 'Loaded the demo data');
+    return reply({ status: dataStatus() });
+  },
+
+  async removeDemoData() {
+    dropDemoRows();
+    record('data', 'demo', 'delete', 'Removed the demo data');
+    return reply({ status: dataStatus() });
+  },
+
+  async clearAllData() {
+    tools = [];
+    payments = [];
+    audit = [];
+    record('data', 'all', 'delete', 'Deleted all tools and payments');
+    return reply({ status: dataStatus() });
   },
 
   async notifications() {

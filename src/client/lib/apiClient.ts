@@ -4,6 +4,7 @@ import type {
   AppSettings,
   AuditEntry,
   CategorySpend,
+  DataStatus,
   KpiSummary,
   NotificationEntry,
   Payment,
@@ -181,6 +182,11 @@ export const api = {
 
   notifications: () => request<{ notifications: NotificationEntry[] }>('/notifications'),
   audit: () => request<{ audit: AuditEntry[] }>('/audit'),
+
+  dataStatus: () => request<{ status: DataStatus; enabled: boolean }>('/data'),
+  loadDemoData: () => request<{ status: DataStatus }>('/data/demo', { method: 'POST' }),
+  removeDemoData: () => request<{ status: DataStatus }>('/data/demo', { method: 'DELETE' }),
+  clearAllData: () => request<{ status: DataStatus }>('/data?confirm=true', { method: 'DELETE' }),
 
   importCsv: (csv: string, commit: boolean) =>
     request<ImportResult>(`/import${commit ? '?commit=true' : ''}`, {

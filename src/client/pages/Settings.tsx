@@ -86,6 +86,8 @@ export default function Settings() {
 
   return (
     <>
+      <DataPanel />
+
       <section className="card">
         <div className="card-head">
           <h2>Where reminders go</h2>
@@ -251,6 +253,88 @@ export default function Settings() {
       <DryRunPanel />
       <ImportPanel onDone={reload} />
     </>
+  );
+}
+
+/**
+ * Bring the demo data in or out, or wipe everything to start fresh.
+ *
+ * "Remove demo data" only touches the built-in sample rows, so tools someone
+ * entered themselves survive it. "Delete everything" does not, which is why it
+ * asks first and says how much it is about to remove.
+ */
+function DataPanel() {
+  const toast = useToast();
+  const { data, error, reload } = useAsync(() => api.dataStatus(), []);
+  const [busy, setBusy] = useState(false);
+
+  async function run(action: () => Promise<unknown>, message: string) {
+    setBusy(true);
+    try {
+      await action();
+      toast(message);
+      reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'That did not work.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (error) return <Banner tone="critical">{error}</Banner>;
+  if (!data) return null;
+
+  const { status, enabled } = data;
+
+  function clearAll() {
+    const ok = window.confirm(
+      `Delete all ${status.tools} tools and ${status.payments} payments, including your own? This cannot be undone.`,
+    );
+    if (ok) run(() => api.clearAllData(), 'All data deleted. You are starting fresh.');
+  }
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Sample data</h2>
+      </div>
+      <p className="card-sub">
+        {status.tools === 0
+          ? 'The dashboard is empty.'
+          : `${status.tools} tool${status.tools === 1 ? '' : 's'} and ${status.payments} payment${status.payments === 1 ? '' : 's'} stored: ${status.demo_tools} demo, ${status.own_tools} yours.`}{' '}
+        Load the demo data to see every alert in action, or clear it to start from scratch.
+      </p>
+
+      {enabled ? null : <Banner tone="info">These controls are switched off in production.</Banner>}
+
+      <div className="toolbar">
+        <button
+          type="button"
+          className="btn primary"
+          disabled={busy || !enabled}
+          onClick={() => run(() => api.loadDemoData(), 'Demo data loaded.')}
+        >
+          {status.demo_tools > 0 ? 'Reload demo data' : 'Load demo data'}
+        </button>
+        <button
+          type="button"
+          className="btn"
+          disabled={busy || !enabled || status.demo_tools === 0}
+          title={status.demo_tools === 0 ? 'There is no demo data to remove' : 'Keeps anything you added yourself'}
+          onClick={() => run(() => api.removeDemoData(), 'Demo data removed.')}
+        >
+          Remove demo data
+        </button>
+        <button
+          type="button"
+          className="btn danger"
+          disabled={busy || !enabled || status.tools === 0}
+          onClick={clearAll}
+        >
+          Delete everything
+        </button>
+      </div>
+    </section>
   );
 }
 

@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
 import { settingsUpdateSchema } from '../../shared/schema';
 import { isIsoDate } from '../../shared/dates';
-import type { Env } from '../context';
+import type { AppContext, Env } from '../context';
 import { actor, db, envVars, featureDocuments, zodErrorResponse } from '../context';
+import { clearAllData, dataStatus, loadDemoData, removeDemoData } from '../repo/demo';
 import { getSettings, updateSettings } from '../repo/settings';
 import { listNotifications } from '../repo/notifications';
 import { listRecentAudit } from '../repo/audit';
@@ -79,6 +80,75 @@ adminRoutes.post('/reminders/run', async (c) => {
     summary: `Ran reminders for ${run.today}`,
   });
   return c.json(run);
+});
+
+/**
+ * Demo data controls, so anyone can start from a clean slate or bring the worked
+ * example back. Refused in production: these endpoints delete data.
+ */
+function refuseInProduction(c: AppContext) {
+  if (c.env.APP_ENV !== 'production') return null;
+  return c.json(
+    { error: 'forbidden', message: 'Demo data controls are disabled in production.' },
+    403,
+  );
+}
+
+adminRoutes.get('/data', async (c) => {
+  return c.json({ status: await dataStatus(db(c)), enabled: c.env.APP_ENV !== 'production' });
+});
+
+adminRoutes.post('/data/demo', async (c) => {
+  const refused = refuseInProduction(c);
+  if (refused) return refused;
+
+  await loadDemoData(db(c));
+  await recordAudit(db(c), {
+    entity: 'data',
+    entity_id: 'demo',
+    action: 'create',
+    actor: actor(c),
+    summary: 'Loaded the demo data',
+  });
+  return c.json({ status: await dataStatus(db(c)) });
+});
+
+adminRoutes.delete('/data/demo', async (c) => {
+  const refused = refuseInProduction(c);
+  if (refused) return refused;
+
+  await removeDemoData(db(c));
+  await recordAudit(db(c), {
+    entity: 'data',
+    entity_id: 'demo',
+    action: 'delete',
+    actor: actor(c),
+    summary: 'Removed the demo data',
+  });
+  return c.json({ status: await dataStatus(db(c)) });
+});
+
+/** Deletes every tool, payment and log entry. Needs `?confirm=true` so a stray request cannot do it. */
+adminRoutes.delete('/data', async (c) => {
+  const refused = refuseInProduction(c);
+  if (refused) return refused;
+
+  if (new URL(c.req.url).searchParams.get('confirm') !== 'true') {
+    return c.json(
+      { error: 'confirmation_required', message: 'Add ?confirm=true to delete all data.' },
+      400,
+    );
+  }
+
+  await clearAllData(db(c));
+  await recordAudit(db(c), {
+    entity: 'data',
+    entity_id: 'all',
+    action: 'delete',
+    actor: actor(c),
+    summary: 'Deleted all tools and payments',
+  });
+  return c.json({ status: await dataStatus(db(c)) });
 });
 
 adminRoutes.get('/notifications', async (c) => {

@@ -115,6 +115,15 @@
   --lift: 0 6px 22px -12px rgba(15, 23, 42, 0.22);
   --field: rgba(255, 255, 255, 0.72);
 
+  /*
+   * The ground. Light uses its own cool teal-and-sky set so this app is not a
+   * twin of the other HARTS dashboards; dark keeps the four logo colours.
+   */
+  --orb-1: #10a3a0; --orb-1-o: 0.17;
+  --orb-2: #5b8fd9; --orb-2-o: 0.19;
+  --orb-3: #3fbf8f; --orb-3-o: 0.14;
+  --orb-4: #e6c56e; --orb-4-o: 0.11;
+
   --aurora-opacity: 1;
 
   --r: 12px;
@@ -183,6 +192,10 @@
     --lift: 0 10px 30px -16px rgba(0, 0, 0, 0.7);
     --field: rgba(255, 255, 255, 0.06);
     --aurora-opacity: 0.62;
+    --orb-1: #dc3f03; --orb-1-o: 0.17;
+    --orb-2: #5387be; --orb-2-o: 0.2;
+    --orb-3: #8bc647; --orb-3-o: 0.15;
+    --orb-4: #f7a90b; --orb-4-o: 0.13;
 
     --selection: rgba(255, 138, 92, 0.28);
   }
@@ -240,6 +253,10 @@
   --lift: 0 10px 30px -16px rgba(0, 0, 0, 0.7);
   --field: rgba(255, 255, 255, 0.06);
   --aurora-opacity: 0.62;
+  --orb-1: #dc3f03; --orb-1-o: 0.17;
+  --orb-2: #5387be; --orb-2-o: 0.2;
+  --orb-3: #8bc647; --orb-3-o: 0.15;
+  --orb-4: #f7a90b; --orb-4-o: 0.13;
 
   --selection: rgba(255, 138, 92, 0.28);
 }
@@ -320,10 +337,10 @@ a:not(.nav-link):not(.btn):hover { text-decoration-color: currentColor; }
  */
 .aurora { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; opacity: var(--aurora-opacity); }
 .aurora i { position: absolute; display: block; border-radius: 50%; filter: blur(88px); will-change: transform; }
-.aurora i:nth-child(1) { width: 54vw; height: 54vw; min-width: 400px; min-height: 400px; background: #dc3f03; opacity: 0.17; top: -16vw; right: -9vw; }
-.aurora i:nth-child(2) { width: 46vw; height: 46vw; min-width: 350px; min-height: 350px; background: #5387be; opacity: 0.2; top: 24vh; left: -13vw; }
-.aurora i:nth-child(3) { width: 42vw; height: 42vw; min-width: 330px; min-height: 330px; background: #8bc647; opacity: 0.15; bottom: -15vw; right: 6vw; }
-.aurora i:nth-child(4) { width: 38vw; height: 38vw; min-width: 290px; min-height: 290px; background: #f7a90b; opacity: 0.13; bottom: -11vw; left: 10vw; }
+.aurora i:nth-child(1) { width: 54vw; height: 54vw; min-width: 400px; min-height: 400px; background: var(--orb-1); opacity: var(--orb-1-o); top: -16vw; right: -9vw; }
+.aurora i:nth-child(2) { width: 46vw; height: 46vw; min-width: 350px; min-height: 350px; background: var(--orb-2); opacity: var(--orb-2-o); top: 24vh; left: -13vw; }
+.aurora i:nth-child(3) { width: 42vw; height: 42vw; min-width: 330px; min-height: 330px; background: var(--orb-3); opacity: var(--orb-3-o); bottom: -15vw; right: 6vw; }
+.aurora i:nth-child(4) { width: 38vw; height: 38vw; min-width: 290px; min-height: 290px; background: var(--orb-4); opacity: var(--orb-4-o); bottom: -11vw; left: 10vw; }
 
 @keyframes drift-a { 50% { transform: translate3d(-4vw, 3vh, 0) scale(1.08); } }
 @keyframes drift-b { 50% { transform: translate3d(5vw, -4vh, 0) scale(0.94); } }

@@ -6,7 +6,7 @@ This app looks like the rest of HARTS. Its visual language is taken from the com
 
 ## The house style (borrowed, deliberately)
 
-- **Glass over an aurora.** Panels are translucent white (`--glass`, `backdrop-filter: blur(18px) saturate(170%)`, hairline white border, inset sheen, soft lift, 12px radius). Behind them is a fixed ground of four blurred orbs in the four colours of the HARTS mark, drifting slowly and holding still under `prefers-reduced-motion`. Without the ground, glass is just a pale rectangle.
+- **Glass over an aurora.** Panels are translucent white (`--glass`, `backdrop-filter: blur(18px) saturate(170%)`, hairline white border, inset sheen, soft lift, 12px radius). Behind them is a fixed ground of four blurred orbs, drifting slowly (light uses a cool teal, sky and mint set so this app is not a twin of the other HARTS dashboards; dark keeps the four colours of the HARTS mark) and holding still under `prefers-reduced-motion`. Without the ground, glass is just a pale rectangle.
 - **Type.** Lexend for headings and controls, Source Sans 3 for reading, JetBrains Mono for tracked uppercase labels, dates and figures' small print. All three are self-hosted (`@fontsource-variable/*`), so the CSP stays `default-src 'self'` with `font-src 'self' data:`.
 - **Navigation.** A glass top bar: logo, pill tabs (solid ink for the current one), urgent count, theme toggle. The page's own heading sits under the bar on the aurora, with an "as at" pill.
 - **State colour.** One triplet per state — tint, hairline, saturated text — always with an icon or a word. Orange-red is the brand accent and the focus/hover marker; blue is links; green is good; amber is soon; red is overdue.

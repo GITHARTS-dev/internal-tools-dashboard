@@ -14,7 +14,7 @@ import {
   listProductCosts,
   upsertProductCost,
 } from '../repo/productCosts';
-import { computeProductUsage } from '../../shared/productCosts';
+import { computeProductUsage, costEntryDue } from '../../shared/productCosts';
 import { formatMoney } from '../../shared/money';
 import { monthOf } from '../../shared/fx';
 import {
@@ -151,10 +151,13 @@ internalProductRoutes.get('/internal-products/:id/costs', async (c) => {
   const settings = await getSettings(db(c));
   const [costs, tables] = await Promise.all([listProductCosts(db(c), id), rateTablesByMonth(db(c))]);
 
+  const today = todayInTimezone(settings.timezone);
   return c.json({
     costs,
     reporting_currency: settings.reporting_currency,
-    usage: computeProductUsage(costs, tables, settings.reporting_currency, todayInTimezone(settings.timezone)),
+    usage: computeProductUsage(costs, tables, settings.reporting_currency, today),
+    // The same answer the reminder and the dashboard flag give.
+    entry_due: costEntryDue(product, costs, today),
   });
 });
 

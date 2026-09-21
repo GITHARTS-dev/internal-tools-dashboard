@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { computeProductUsage, lastCompleteMonth } from '../src/shared/productCosts';
+import {
+  computeProductUsage,
+  costEntryDue,
+  formatMonth,
+  lastCompleteMonth,
+} from '../src/shared/productCosts';
+import { computeAlerts } from '../src/shared/alerts';
+import { isNotifiable } from '../src/shared/alerts';
+import { DEFAULT_SETTINGS } from '../src/shared/types';
+import { buildTeamsCard } from '../src/server/notify/teams';
 import { computeCeoSummary } from '../src/shared/ceo';
 import { rateTable, type FxRate } from '../src/shared/fx';
 import type { InternalProduct, ProductCost, Tool } from '../src/shared/types';
@@ -270,14 +279,14 @@ describe('the CEO summary with recorded product costs', () => {
     expect(result.internal.tool_count).toBe(0);
   });
 
-  it('flags a product whose latest month is missing, but not a retired one', () => {
+  it('flags a product whose last complete month is due, but not a retired one', () => {
     const live = computeCeoSummary({
       ...base,
       products: [product()],
       tools: [],
       monthlyCosts: [cost({ month: '2026-06' })],
     });
-    expect(live.products[0]!.latest_month_missing).toBe(true);
+    expect(live.products[0]!.cost_entry_due).toBe(true);
 
     const retired = computeCeoSummary({
       ...base,
@@ -286,7 +295,23 @@ describe('the CEO summary with recorded product costs', () => {
       monthlyCosts: [cost({ month: '2026-06' })],
     });
     // Nobody is expected to keep entering bills for something that is switched off.
-    expect(retired.products[0]!.latest_month_missing).toBe(false);
+    expect(retired.products[0]!.cost_entry_due).toBe(false);
+  });
+
+  it('agrees with the reminder about which products are overdue', () => {
+    const products = [product({ id: 'p1' }), product({ id: 'p2', name: 'Other' })];
+    const monthlyCosts = [cost({ product_id: 'p2', month: '2026-08' })];
+
+    const summary = computeCeoSummary({ ...base, products, tools: [], monthlyCosts });
+    const alerts = computeAlerts([], [], DEFAULT_SETTINGS, TODAY, { products, costs: monthlyCosts });
+
+    const dueOnScreen = summary.products.filter((p) => p.cost_entry_due).map((p) => p.product.id);
+    const dueInReminder = alerts.filter((a) => a.rule === 'costs_missing').map((a) => a.product_id);
+
+    // One definition: the flag on the dashboard and the message in Teams must
+    // never disagree about whether a product is up to date.
+    expect(dueOnScreen).toEqual(['p1']);
+    expect(dueInReminder).toEqual(['p1']);
   });
 
   it('puts recorded costs into what was actually paid', () => {
@@ -336,5 +361,144 @@ describe('the CEO summary with recorded product costs', () => {
   it('is unchanged for callers that pass no monthly costs at all', () => {
     const result = computeCeoSummary({ ...base, products: [product()], tools: [tool()] });
     expect(result.products[0]!.monthly_reported).toBe(10_00);
+  });
+});
+
+describe('costEntryDue', () => {
+  const TODAY_DUE = '2026-09-19';
+
+  it('is due once last month is over, bills are final and nothing is entered', () => {
+    expect(costEntryDue(product(), [], TODAY_DUE)).toBe(true);
+  });
+
+  it('is not due once last complete month has an entry', () => {
+    expect(costEntryDue(product(), [cost({ month: '2026-08' })], TODAY_DUE)).toBe(false);
+  });
+
+  it('does not count an entry for a different month, or another product', () => {
+    expect(costEntryDue(product(), [cost({ month: '2026-07' })], TODAY_DUE)).toBe(true);
+    expect(costEntryDue(product(), [cost({ month: '2026-08', product_id: 'other' })], TODAY_DUE)).toBe(true);
+  });
+
+  it('waits until the bills are final', () => {
+    // Asking on 1 September for a figure that does not exist yet would be noise.
+    expect(costEntryDue(product(), [], '2026-09-01')).toBe(false);
+    expect(costEntryDue(product(), [], '2026-09-04')).toBe(false);
+    expect(costEntryDue(product(), [], '2026-09-05')).toBe(true);
+  });
+
+  it('never applies to a retired product', () => {
+    expect(costEntryDue(product({ status: 'retired' }), [], TODAY_DUE)).toBe(false);
+  });
+
+  it('does not ask a product added this month about last month', () => {
+    const added = product({ created_at: '2026-09-10T00:00:00.000Z' });
+    expect(costEntryDue(added, [], TODAY_DUE)).toBe(false);
+    // ...but does ask the month after, when its first full month is over.
+    expect(costEntryDue(added, [], '2026-10-06')).toBe(true);
+  });
+
+  it('asks about history once a launch date shows it was already running', () => {
+    const added = product({ created_at: '2026-09-10T00:00:00.000Z' });
+    // Added to the app this month, but launched years ago: it had bills last month.
+    expect(costEntryDue({ ...added, launched_on: '2024-01-01' }, [], TODAY_DUE)).toBe(true);
+  });
+
+  it('handles a year boundary', () => {
+    expect(costEntryDue(product(), [cost({ month: '2025-12' })], '2026-01-10')).toBe(false);
+    expect(costEntryDue(product(), [cost({ month: '2025-11' })], '2026-01-10')).toBe(true);
+  });
+});
+
+describe('the missing-costs alert', () => {
+  const run = (products: InternalProduct[], costs: ProductCost[], today = TODAY) =>
+    computeAlerts([], [], DEFAULT_SETTINGS, today, { products, costs }).filter(
+      (a) => a.rule === 'costs_missing',
+    );
+
+  it('names the product and the month, and links to the product rather than a tool', () => {
+    const [alert] = run([product({ owner_name: 'Madhan', owner_email: 'madhan@example.com' })], []);
+
+    expect(alert).toBeDefined();
+    expect(alert!.title).toBe('TRA: Aug 2026 costs have not been entered');
+    expect(alert!.product_id).toBe('p1');
+    // A product alert has no tool: the notification log's tool_id is a foreign
+    // key to tools, so a made-up value there would fail the insert.
+    expect(alert!.tool_id).toBeNull();
+    expect(alert!.owner_email).toBe('madhan@example.com');
+    expect(alert!.severity).toBe('warning');
+  });
+
+  it('is pushed to Teams, since a forgotten month is exactly what it exists to catch', () => {
+    expect(isNotifiable(run([product()], [])[0]!)).toBe(true);
+  });
+
+  it('is silent once the month is entered', () => {
+    expect(run([product()], [cost({ month: '2026-08' })])).toHaveLength(0);
+  });
+
+  it('is silent for a retired product and before bills are final', () => {
+    expect(run([product({ status: 'retired' })], [])).toHaveLength(0);
+    expect(run([product()], [], '2026-09-03')).toHaveLength(0);
+  });
+
+  it('is chased weekly, not daily: the key holds for a week and then moves on', () => {
+    const key = (day: string) => run([product()], [], `2026-09-${day}`)[0]!.dedupe_key;
+
+    // Days 5 to 11 are one week, so the same reminder is not resent each morning.
+    expect(key('05')).toBe(key('11'));
+    // Day 12 starts the next week, so a month that stays missing is raised again.
+    expect(key('12')).not.toBe(key('11'));
+    expect(key('12')).toBe(key('18'));
+    expect(key('19')).not.toBe(key('18'));
+  });
+
+  it('is a fresh reminder for a fresh month', () => {
+    const sep = run([product()], [], '2026-09-10')[0]!.dedupe_key;
+    const oct = run([product()], [], '2026-10-10')[0]!.dedupe_key;
+    expect(sep).not.toBe(oct);
+  });
+
+  it('leaves the existing alerts alone when no product context is passed', () => {
+    const without = computeAlerts([], [], DEFAULT_SETTINGS, TODAY);
+    expect(without.some((a) => a.rule === 'costs_missing')).toBe(false);
+  });
+
+  it('formats a month the way the screen does', () => {
+    expect(formatMonth('2026-08')).toBe('Aug 2026');
+    expect(formatMonth('2025-12')).toBe('Dec 2025');
+  });
+});
+
+describe('the missing-costs alert in Teams', () => {
+  const card = () => {
+    const alerts = computeAlerts([], [], DEFAULT_SETTINGS, TODAY, {
+      products: [product({ owner_name: 'Madhan' })],
+      costs: [],
+    }).filter((a) => a.rule === 'costs_missing');
+
+    return buildTeamsCard({ title: 'Test', text: '', alerts, kind: 'alerts' }) as {
+      attachments: Array<{ content: { body: Array<Record<string, unknown>> } }>;
+    };
+  };
+
+  const texts = () =>
+    card().attachments[0]!.content.body.flatMap((block) => {
+      const items = (block['items'] as Array<Record<string, unknown>> | undefined) ?? [block];
+      return items.map((i) => String(i['text'] ?? ''));
+    });
+
+  it('gets its own section heading', () => {
+    expect(texts().some((t) => t.startsWith('Monthly costs to enter'))).toBe(true);
+  });
+
+  it('says what to do, not just who owns it', () => {
+    const lines = texts();
+    // The detail line carries the instruction and then the owner. It used to be
+    // just "· Madhan" for any alert without a date, which told the reader nothing.
+    const detail = lines.find((t) => t.includes('Enter what its cloud providers billed'));
+    expect(detail).toBeDefined();
+    expect(detail).toContain('Madhan');
+    expect(lines).not.toContain('· Madhan');
   });
 });

@@ -41,7 +41,10 @@ function alertBlock(alert: Alert): unknown {
       },
       {
         type: 'TextBlock',
-        text: [when, owner].filter(Boolean).join('').trim() || alert.detail,
+        // An alert with no date has nothing to say about when, so its detail is
+        // the useful line. Without this a missing-data alert with an owner
+        // rendered as just "· Owner", and told the reader nothing.
+        text: (when ? `${when}${owner}` : `${alert.detail}${owner}`).trim(),
         wrap: true,
         isSubtle: true,
         spacing: 'None',

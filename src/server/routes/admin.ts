@@ -187,6 +187,7 @@ adminRoutes.post('/channels/:name/test', async (c) => {
     rule: 'renewal_upcoming',
     severity: 'info',
     tool_id: 'test',
+    product_id: null,
     tool_name: 'Test message',
     payment_id: null,
     title: 'Test message from the tools dashboard',

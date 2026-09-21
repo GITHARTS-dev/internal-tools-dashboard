@@ -30,7 +30,7 @@ import {
   toolCreateSchema,
   toolUpdateSchema,
 } from '../../shared/schema';
-import { computeProductUsage } from '../../shared/productCosts';
+import { computeProductUsage, costEntryDue } from '../../shared/productCosts';
 import { monthOf } from '../../shared/fx';
 import { formatMoney } from '../../shared/money';
 import { computeCeoSummary } from '../../shared/ceo';
@@ -211,7 +211,7 @@ export const demoApi = {
 
   async dashboard(date?: string) {
     const today = date || DEMO_TODAY;
-    const alerts = computeAlerts(tools, payments, settings(), today);
+    const alerts = computeAlerts(tools, payments, settings(), today, { products: internalProducts, costs: productCosts });
     return reply({
       today,
       timezone: settings().timezone,
@@ -447,7 +447,7 @@ export const demoApi = {
           notice_lead_days: [current.digest_horizon_days],
         }
       : current;
-    const alerts = computeAlerts(tools, payments, effective, today);
+    const alerts = computeAlerts(tools, payments, effective, today, { products: internalProducts, costs: productCosts });
 
     return reply({
       today,
@@ -720,6 +720,7 @@ export const demoApi = {
     if (!internalProducts.some((p) => p.id === productId)) {
       throw new ApiError('No internal product with that id.', 404);
     }
+    const product = internalProducts.find((p) => p.id === productId)!;
     const costs = productCosts
       .filter((c) => c.product_id === productId)
       .sort((a, b) => b.month.localeCompare(a.month) || a.provider.localeCompare(b.provider));
@@ -727,6 +728,7 @@ export const demoApi = {
       costs,
       reporting_currency: settings().reporting_currency,
       usage: computeProductUsage(costs, demoRateTables(), settings().reporting_currency, DEMO_TODAY),
+      entry_due: costEntryDue(product, costs, DEMO_TODAY),
     });
   },
 

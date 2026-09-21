@@ -369,7 +369,7 @@ export function ProductsCard({ summary }: { summary: CeoSummary }) {
                     {entry.product.owner_name ? ` · ${entry.product.owner_name}` : ''}
                     {entry.product.status !== 'live' ? ` · ${entry.product.status}` : ''}
                   </div>
-                  {entry.latest_month_missing ? (
+                  {entry.cost_entry_due ? (
                     <div style={{ marginTop: 6 }}>
                       <Link to={`/products/${entry.product.id}`}>
                         <Badge tone="warning">

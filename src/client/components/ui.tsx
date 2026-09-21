@@ -81,12 +81,12 @@ export function StatTile({
   );
 }
 
-export function AlertRow({ alert, onOpen }: { alert: Alert; onOpen?: (toolId: string) => void }) {
+export function AlertRow({ alert, onOpen }: { alert: Alert; onOpen?: (alert: Alert) => void }) {
   const SeverityIcon = SEVERITY_ICON[alert.severity];
   return (
     <div
       className="alert-row"
-      onClick={onOpen ? () => onOpen(alert.tool_id) : undefined}
+      onClick={onOpen ? () => onOpen(alert) : undefined}
       style={onOpen ? { cursor: 'pointer' } : undefined}
     >
       <span className={`alert-icon ${alert.severity}`}>
@@ -109,7 +109,7 @@ export function AlertRow({ alert, onOpen }: { alert: Alert; onOpen?: (toolId: st
   );
 }
 
-export function AlertList({ alerts, onOpen }: { alerts: Alert[]; onOpen?: (toolId: string) => void }) {
+export function AlertList({ alerts, onOpen }: { alerts: Alert[]; onOpen?: (alert: Alert) => void }) {
   if (alerts.length === 0) {
     return (
       <div className="empty">

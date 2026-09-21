@@ -211,7 +211,6 @@ export default function ProductDetail() {
       {costs.data ? (
         <MonthlyCosts
           productId={id}
-          productStatus={product.status}
           data={costs.data}
           onChanged={costs.reload}
         />

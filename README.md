@@ -94,6 +94,7 @@ nowhere else for the two to disagree.
 | `renewal_upcoming` | renewal within 60 / 30 / 14 / 7 / 3 / 1 days |
 | `notice_deadline` | the last day to cancel before auto-renewal |
 | `missing_data` | an active tool with no owner, no cost or no renewal date |
+| `costs_missing` | a live product with no cost entered for last month, from the 5th on, then weekly |
 | `seats_underused` | paid seats sitting idle |
 
 Every alert carries a `dedupe_key` naming its lead step. The notification log
@@ -176,8 +177,17 @@ average of the last three complete months. That average is labelled an estimate,
 not a commitment, and it is taken only over months that were actually entered:
 a month nobody typed is unknown, not zero, and averaging it in as zero would
 quietly understate the product's cost. A product whose last complete month is
-still missing is flagged on the dashboard, because manual entry only fails one
-way: by being forgotten while the figures keep looking current.
+still missing is flagged, because manual entry only fails one way: by being
+forgotten while the figures keep looking current.
+
+That flag is also a reminder. From the 5th of the month, when the previous
+month's bills are final, a live product with nothing entered for that month
+appears in Needs attention and is posted to Teams, then again each week it stays
+missing, and stops the moment the month is entered. A product added this month is
+not asked about last month, since it did not exist; give it a launch date if it
+was already running and it will be asked about its history. The reminder, the
+flag on the dashboard and the banner on the product page all use one function to
+decide, so they cannot disagree about whether a product is up to date.
 
 Recorded costs also count towards "what we actually paid", so the AWS bill is in
 the history as well as the run rate. Do not also record the same AWS bill as a

@@ -19,7 +19,7 @@
 
 import { annualisedCost, monthlyCost, wastedSeatCost } from './money';
 import { addMonthsToYearMonth, monthOf, sumConverted, type RateTable, type YearMonth } from './fx';
-import { computeProductUsage } from './productCosts';
+import { computeProductUsage, costEntryDue } from './productCosts';
 import type {
   CeoSummary,
   InternalProduct,
@@ -162,8 +162,9 @@ export function computeCeoSummary(input: CeoSummaryInput): CeoSummary {
         usage_annual_reported: usageAnnual,
         usage_months_counted: usage.months_counted,
         last_cost_month: usage.last_cost_month,
-        // A retired product is not expected to keep getting bills entered.
-        latest_month_missing: product.status !== 'retired' && usage.latest_month_missing,
+        // The shared definition: not retired, existed then, bills should be
+        // final by now. The reminder asks the same function.
+        cost_entry_due: costEntryDue(product, costsByProduct.get(product.id) ?? [], today),
         // Fixed + usage. A fixed part that could not be converted makes the
         // total unknown; a usage part that is unknown simply adds nothing.
         monthly_reported: fixedMonthly === null ? null : fixedMonthly + (usageMonthly ?? 0),

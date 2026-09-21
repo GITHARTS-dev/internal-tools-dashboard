@@ -8,7 +8,7 @@ import { IconEdit } from './icons';
 import { monthLabel } from './spend';
 import { addMonthsToYearMonth } from '../../shared/fx';
 import { formatMoney, parseMoneyInput, toDecimalString } from '../../shared/money';
-import type { InternalProductStatus, ProductCost } from '../../shared/types';
+import type { ProductCost } from '../../shared/types';
 
 /**
  * What a product actually cost, month by month.
@@ -40,12 +40,10 @@ interface FormState {
 
 export default function MonthlyCosts({
   productId,
-  productStatus,
   data,
   onChanged,
 }: {
   productId: string;
-  productStatus: InternalProductStatus;
   data: ProductCostsResponse;
   onChanged: () => void;
 }) {
@@ -163,7 +161,6 @@ export default function MonthlyCosts({
   const counted = usage.window.filter((m) => m.amount !== null);
   const foreign = costs.some((c) => c.currency.toUpperCase() !== reporting.toUpperCase());
   const visible = showAll ? costs : costs.slice(0, ROWS_SHOWN);
-  const expectsEntries = productStatus !== 'retired';
 
   return (
     <section className="card">
@@ -179,7 +176,7 @@ export default function MonthlyCosts({
 
       {/* --------------------------------------------------- what it means */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
-        {expectsEntries && usage.latest_month_missing ? (
+        {data.entry_due ? (
           <Banner tone="warning">
             <span>
               <strong>{monthLabel(lastMonth, true)} has not been entered.</strong> Until it is,

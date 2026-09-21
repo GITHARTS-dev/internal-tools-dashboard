@@ -125,6 +125,8 @@ export interface ProductCostsResponse {
   costs: ProductCost[];
   reporting_currency: string;
   usage: ProductUsage;
+  /** Whether last month's cost is overdue to be entered: the reminder's own definition. */
+  entry_due: boolean;
 }
 
 export const api = {

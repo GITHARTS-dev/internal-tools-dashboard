@@ -28,7 +28,7 @@ import {
   type RateTable,
   type YearMonth,
 } from './fx';
-import type { IsoDate, ProductCost } from './types';
+import type { InternalProduct, IsoDate, ProductCost } from './types';
 
 /** How many of the most recent complete months the average is taken over. */
 export const USAGE_WINDOW_MONTHS = 3;
@@ -127,4 +127,56 @@ export function computeProductUsage(
     gaps: [...gaps.values()],
     rate_months: [...rateMonths].sort(),
   };
+}
+
+// ---------------------------------------------------------------------------
+// When is a month's cost due to be entered?
+// ---------------------------------------------------------------------------
+
+/**
+ * Cloud bills are usually final a few days into the following month, so nothing
+ * is flagged before this day. Asking for August's figure on 1 September would
+ * be asking for a number that does not exist yet.
+ */
+export const COSTS_FINAL_FROM_DAY = 5;
+
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** '2026-08' -> 'Aug 2026'. */
+export function formatMonth(month: YearMonth): string {
+  return `${MONTH_NAMES[Number(month.slice(5, 7)) - 1] ?? month} ${month.slice(0, 4)}`;
+}
+
+/**
+ * Whether the last complete month's cost is overdue to be entered for a product.
+ *
+ * This is the ONE definition of that. The reminder, the flag on the dashboard
+ * and the banner on the product page all ask this function, for the same reason
+ * the alert engine is a single function: the screen must never show a product as
+ * up to date while the reminder considers it overdue.
+ *
+ * It is due when the product is not retired, its last complete month has no
+ * entry, that month's bills should be final by now, and the product actually
+ * existed then. A product added this month has nothing to enter for last month.
+ * "Existed" uses the earliest date known -- its launch date if one was given,
+ * otherwise when it was added -- so setting a launch date is how a product that
+ * has been running for years starts being asked about its history.
+ */
+export function costEntryDue(
+  product: InternalProduct,
+  costs: ProductCost[],
+  today: IsoDate,
+): boolean {
+  if (product.status === 'retired') return false;
+  if (Number(today.slice(8, 10)) < COSTS_FINAL_FROM_DAY) return false;
+
+  const month = lastCompleteMonth(today);
+
+  const known = [product.launched_on, product.created_at]
+    .filter((d): d is string => Boolean(d))
+    .map((d) => d.slice(0, 7))
+    .sort();
+  if (known.length > 0 && known[0]! > month) return false;
+
+  return !costs.some((c) => c.product_id === product.id && c.month === month);
 }

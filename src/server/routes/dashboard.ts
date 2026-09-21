@@ -12,6 +12,8 @@ import type { Env } from '../context';
 import { db } from '../context';
 import { listAllTools } from '../repo/tools';
 import { listPayments, paidTotalsByTool } from '../repo/payments';
+import { listInternalProducts } from '../repo/internalProducts';
+import { listAllProductCosts } from '../repo/productCosts';
 import { getSettings } from '../repo/settings';
 import { listRecentAudit } from '../repo/audit';
 
@@ -28,8 +30,13 @@ dashboardRoutes.get('/', async (c) => {
   const override = new URL(c.req.url).searchParams.get('date');
   const today = override && isIsoDate(override) ? override : todayInTimezone(settings.timezone);
 
-  const [tools, payments] = await Promise.all([listAllTools(db(c)), listPayments(db(c))]);
-  const alerts = computeAlerts(tools, payments, settings, today);
+  const [tools, payments, products, costs] = await Promise.all([
+    listAllTools(db(c)),
+    listPayments(db(c)),
+    listInternalProducts(db(c)),
+    listAllProductCosts(db(c)),
+  ]);
+  const alerts = computeAlerts(tools, payments, settings, today, { products, costs });
 
   return c.json({
     today,

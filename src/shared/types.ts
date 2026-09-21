@@ -188,6 +188,7 @@ export type AlertRule =
   | 'renewal_upcoming'
   | 'notice_deadline'
   | 'missing_data'
+  | 'costs_missing'
   | 'seats_underused';
 
 export type Severity = 'critical' | 'warning' | 'info';
@@ -195,7 +196,11 @@ export type Severity = 'critical' | 'warning' | 'info';
 export interface Alert {
   rule: AlertRule;
   severity: Severity;
-  tool_id: string;
+  /** Null for an alert about one of our own products rather than a tool. */
+  tool_id: string | null;
+  /** Set for an alert about one of our own products; null for a tool. */
+  product_id: string | null;
+  /** Whatever the alert is about: a tool's name, or a product's. */
   tool_name: string;
   payment_id: string | null;
   title: string;
@@ -288,8 +293,11 @@ export interface InternalProductCost {
   usage_months_counted: number;
   /** The most recent month with any entry, complete or not. */
   last_cost_month: string | null;
-  /** True when last month's costs have not been entered yet. */
-  latest_month_missing: boolean;
+  /**
+   * True when last month's costs are overdue to be entered. The same definition
+   * the reminder uses, so the flag on screen and the message in Teams agree.
+   */
+  cost_entry_due: boolean;
   /** Fixed + usage. What the dashboard shows for this product. */
   monthly_reported: number | null;
   annual_reported: number | null;

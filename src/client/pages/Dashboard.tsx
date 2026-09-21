@@ -97,7 +97,13 @@ export default function Dashboard() {
             as of {formatDate(data.today)} · {data.timezone}
           </span>
         </div>
-        <AlertList alerts={visibleAlerts} onOpen={(id) => navigate(`/tools/${id}`)} />
+        <AlertList
+          alerts={visibleAlerts}
+          // A product alert opens the product, where the cost is entered.
+          onOpen={(alert) =>
+            navigate(alert.product_id ? `/products/${alert.product_id}` : `/tools/${alert.tool_id}`)
+          }
+        />
         {alerts.length > ALERTS_SHOWN ? (
           <button
             type="button"

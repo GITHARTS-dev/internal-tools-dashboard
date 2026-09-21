@@ -5,6 +5,8 @@ import type { Db } from './repo/db';
 import { getSettings } from './repo/settings';
 import { listAllTools } from './repo/tools';
 import { listPayments } from './repo/payments';
+import { listInternalProducts } from './repo/internalProducts';
+import { listAllProductCosts } from './repo/productCosts';
 import { consoleChannel } from './notify/console';
 import { emailChannel } from './notify/email';
 import { teamsChannel } from './notify/teams';
@@ -81,14 +83,16 @@ export async function runReminders(
 
   const tools = await listAllTools(db);
   const payments = await listPayments(db);
+  const [products, costs] = await Promise.all([listInternalProducts(db), listAllProductCosts(db)]);
+  const productContext = { products, costs };
 
-  const alerts = computeAlerts(tools, payments, settings, today);
+  const alerts = computeAlerts(tools, payments, settings, today, productContext);
   const alertDispatch = await dispatchAlerts(db, alerts, settings, env, channels, { dryRun });
 
   let digestDispatch: DispatchReport | null = null;
   const isDigestDay = isoWeekday(today) === settings.digest_weekday;
   if (options.forceDigest || isDigestDay) {
-    const digestAlerts = computeAlerts(tools, payments, digestSettings(settings), today);
+    const digestAlerts = computeAlerts(tools, payments, digestSettings(settings), today, productContext);
     digestDispatch = await dispatchDigest(
       db,
       digestAlerts,

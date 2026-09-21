@@ -86,12 +86,6 @@ export const IconProducts = (p: IconProps) => (
   </Icon>
 );
 
-export const IconSummary = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
-  </Icon>
-);
-
 /* ----------------------------------------------------------------- status */
 
 export const IconCritical = (p: IconProps) => (
@@ -178,5 +172,12 @@ export const IconArrowLeft = (p: IconProps) => (
 export const IconExchange = (p: IconProps) => (
   <Icon {...p}>
     <path d="M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4" />
+  </Icon>
+);
+
+export const IconEdit = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3Z" />
+    <path d="m14.5 7.5 3 3" />
   </Icon>
 );

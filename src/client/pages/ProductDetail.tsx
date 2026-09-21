@@ -2,7 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Badge, EmptyState, Loading, MoneyTotals, StatusBadge, useToast } from '../components/ui';
-import { IconArrowLeft } from '../components/icons';
+import { IconArrowLeft, IconEdit } from '../components/icons';
+import ProductForm, {
+  PRODUCT_STATUS_LABEL,
+  valuesFromProduct,
+} from '../components/ProductForm';
 import { annualisedCost, monthlyCost } from '../../shared/money';
 import { formatDate } from '../../shared/dates';
 import type { InternalProduct, InternalProductStatus, Tool } from '../../shared/types';
@@ -12,14 +16,11 @@ import type { InternalProduct, InternalProductStatus, Tool } from '../../shared/
  *
  * Totals stay per-currency here on purpose. This screen is the admin's working
  * view, where seeing "$45/mo + ₹2,000/mo" is more useful than one converted
- * figure; the single-currency roll-up is the cost summary's job.
+ * figure; the single-currency roll-up lives on the dashboard.
+ *
+ * Everything the edit form can set is shown here when it has a value, so what
+ * you type and what you read back are the same set of facts.
  */
-
-const STATUS_LABEL: Record<InternalProductStatus, string> = {
-  live: 'Live',
-  building: 'Building',
-  retired: 'Retired',
-};
 
 const STATUS_TONE: Record<InternalProductStatus, 'good' | 'warning' | 'info'> = {
   live: 'good',
@@ -34,6 +35,7 @@ export default function ProductDetail() {
   const [product, setProduct] = useState<InternalProduct | null>(null);
   const [tools, setTools] = useState<Tool[]>([]);
   const [missing, setMissing] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   const load = useCallback(() => {
     api
@@ -99,39 +101,93 @@ export default function ProductDetail() {
           </Link>
         </div>
 
-        <div className="card-head" style={{ marginBottom: 6 }}>
-          <h1>{product.name}</h1>
-          <Badge tone={STATUS_TONE[product.status]} dot>
-            {STATUS_LABEL[product.status]}
-          </Badge>
-        </div>
+        {editing ? (
+          <>
+            <div className="card-head">
+              <h2>Edit {product.name}</h2>
+            </div>
+            <ProductForm
+              initial={valuesFromProduct(product)}
+              submitLabel="Save changes"
+              onCancel={() => setEditing(false)}
+              onSubmit={async (values) => {
+                const { product: saved } = await api.updateInternalProduct(id, values);
+                setProduct(saved);
+                setEditing(false);
+                toast('Saved.');
+              }}
+            />
+          </>
+        ) : (
+          <>
+            <div className="card-head" style={{ marginBottom: 6 }}>
+              <h1>{product.name}</h1>
+              <Badge tone={STATUS_TONE[product.status]} dot>
+                {PRODUCT_STATUS_LABEL[product.status]}
+              </Badge>
+              <button
+                type="button"
+                className="btn sm"
+                style={{ marginLeft: 'auto' }}
+                onClick={() => setEditing(true)}
+              >
+                <IconEdit size={13} />
+                Edit
+              </button>
+            </div>
 
-        {product.description ? (
-          <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>{product.description}</p>
-        ) : null}
+            {product.description ? (
+              <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
+                {product.description}
+              </p>
+            ) : null}
 
-        <dl className="detail-grid">
-          <div className="detail-item">
-            <dt>Monthly running cost</dt>
-            <dd>
-              <MoneyTotals totals={monthly} />
-            </dd>
-          </div>
-          <div className="detail-item">
-            <dt>Annual running cost</dt>
-            <dd>
-              <MoneyTotals totals={annual} />
-            </dd>
-          </div>
-          <div className="detail-item">
-            <dt>Owner</dt>
-            <dd>{product.owner_name || '--'}</dd>
-          </div>
-          <div className="detail-item">
-            <dt>Launched</dt>
-            <dd>{formatDate(product.launched_on)}</dd>
-          </div>
-        </dl>
+            <dl className="detail-grid">
+              <div className="detail-item">
+                <dt>Monthly running cost</dt>
+                <dd>
+                  <MoneyTotals totals={monthly} />
+                </dd>
+              </div>
+              <div className="detail-item">
+                <dt>Annual running cost</dt>
+                <dd>
+                  <MoneyTotals totals={annual} />
+                </dd>
+              </div>
+              <div className="detail-item">
+                <dt>Owner</dt>
+                <dd>
+                  {product.owner_name || '--'}
+                  {product.owner_email ? (
+                    <div className="cell-sub">
+                      <a href={`mailto:${product.owner_email}`}>{product.owner_email}</a>
+                    </div>
+                  ) : null}
+                </dd>
+              </div>
+              <div className="detail-item">
+                <dt>Launched</dt>
+                <dd>{formatDate(product.launched_on)}</dd>
+              </div>
+              {product.status === 'retired' ? (
+                <div className="detail-item">
+                  <dt>Retired</dt>
+                  <dd>{formatDate(product.retired_on)}</dd>
+                </div>
+              ) : null}
+            </dl>
+
+            {product.notes ? (
+              <div style={{ marginTop: 16 }}>
+                <div className="detail-item">
+                  <dt>Notes</dt>
+                  <dd style={{ whiteSpace: 'pre-wrap' }}>{product.notes}</dd>
+                </div>
+              </div>
+            ) : null}
+          </>
+        )}
       </div>
 
       <div className="card">
@@ -146,7 +202,7 @@ export default function ProductDetail() {
         </div>
 
         {tools.length === 0 ? (
-          <EmptyState title="Nothing attributed yet">
+          <EmptyState title="Nothing attributed yet" compact>
             Open a hosting, domain or API subscription on the <Link to="/tools">Tools</Link> screen
             and set its product to {product.name}.
           </EmptyState>

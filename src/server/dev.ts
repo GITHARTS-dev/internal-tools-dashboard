@@ -25,7 +25,7 @@ import { postgresDb } from './repo/postgres';
 import type { Env } from './context';
 import type { Db } from './repo/db';
 
-const PORT = Number(process.env['PORT'] ?? 8787);
+const PORT = Number(process.env['PORT'] ?? 8788);
 const DB_FILE = process.env['SQLITE_FILE'] ?? '.data/dev.sqlite';
 const MIGRATIONS = fileURLToPath(new URL('../../migrations/', import.meta.url));
 

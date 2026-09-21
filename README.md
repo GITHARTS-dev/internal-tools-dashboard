@@ -28,7 +28,7 @@ It answers three questions that currently have no home:
 ```bash
 npm install
 npm run db:reset   # create the local database and load demo data
-npm run dev        # API on :8787, app on http://localhost:5173
+npm run dev        # API on :8788, app on http://localhost:5173
 ```
 
 Open <http://localhost:5173>. The demo data is deliberately messy: an overdue

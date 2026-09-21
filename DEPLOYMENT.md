@@ -284,7 +284,7 @@ Unchanged by any of this, and still needs no cloud account:
 ```bash
 npm install
 npm run db:reset    # rebuild .data/dev.sqlite and load the demo data
-npm run dev         # API on :8787, client on :5173
+npm run dev         # API on :8788, client on :5173
 ```
 
 Local runs on SQLite so it stays instant and offline. The fidelity that costs is

@@ -11,7 +11,7 @@
  * change every time the page loads. Totals are therefore per-currency.
  */
 
-import { daysBetween } from './dates';
+import { addDays, daysBetween } from './dates';
 import { annualisedCost, monthlyCost, wastedSeatCost } from './money';
 import { effectiveRenewalDate } from './alerts';
 import type {
@@ -145,11 +145,20 @@ export function computeRenewalTimeline(
     const daysUntil = daysBetween(today, date);
     if (daysUntil < 0 || daysUntil > horizonDays) continue;
 
+    // The last day to cancel. Only meaningful when the tool will actually
+    // auto-renew and asks for notice; otherwise there is no deadline to miss.
+    const noticeDate =
+      tool.auto_renew && tool.cancellation_notice_days > 0
+        ? addDays(date, -tool.cancellation_notice_days)
+        : null;
+
     out.push({
       tool_id: tool.id,
       tool_name: tool.name,
       date,
       days_until: daysUntil,
+      notice_date: noticeDate,
+      notice_days_until: noticeDate ? daysBetween(today, noticeDate) : null,
       amount: tool.cost_amount,
       currency: tool.currency.toUpperCase(),
       billing_cycle: tool.billing_cycle,

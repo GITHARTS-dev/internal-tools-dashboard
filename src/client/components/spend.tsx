@@ -1,7 +1,13 @@
 import { Link } from 'react-router-dom';
-import { AreaTrend, BarRows } from './Charts';
+import {
+  BarRows,
+  CumulativeCompare,
+  SeatMeter,
+  Sparkline,
+  StackedColumns,
+  type CumulativeInput,
+} from './Charts';
 import { Badge, Banner, EmptyState, MoneyTotals } from './ui';
-import { IconExchange } from './icons';
 import { formatDate } from '../../shared/dates';
 import { formatMoney } from '../../shared/money';
 import type { CeoSummary } from '../../shared/types';
@@ -68,9 +74,8 @@ export function Delta({ pct }: { pct: number | null }) {
 /**
  * The one number the spend half exists to deliver.
  *
- * Not a card: it sits directly on the page ground, which is what makes it read
- * as the page's opening statement rather than the first of several equal tiles.
- * Two columns on a wide screen so it costs about 150px of height rather than
+ * A larger, brighter glass panel than the rest, and it carries its own trend
+ * line so the number arrives with a direction rather than alone. Two columns on a wide screen so it costs about 150px of height rather than
  * 300 -- it shares the top of the page with the alerts, and must not push them
  * below the fold.
  *
@@ -94,6 +99,7 @@ export function SpendLead({
   // Once cloud usage is in the figure it is no longer purely a commitment, and
   // calling it one would overstate how fixed it is.
   const hasUsage = summary.internal.usage_annual_reported !== null;
+  const last12 = summary.paid_by_month.slice(-12);
 
   return (
     <section className="lead" aria-labelledby="lead-heading">
@@ -137,6 +143,18 @@ export function SpendLead({
           <p className="lead-native">
             Before conversion: <MoneyTotals totals={native} />
           </p>
+        ) : null}
+
+        {/* The headline arrives with a direction: the last 12 complete months. */}
+        {last12.length >= 2 && last12.some((row) => row.amount > 0) ? (
+          <div className="lead-trend">
+            <span className="lbl">Paid each month, last 12 months</span>
+            <Sparkline
+              values={last12.map((row) => row.amount)}
+              labels={last12.map((row) => monthLabel(row.month, true))}
+              currency={currency}
+            />
+          </div>
         ) : null}
       </div>
 
@@ -193,50 +211,98 @@ export function SpendLead({
 
 // ------------------------------------------------------------------- trend
 
+/**
+ * Twelve complete months, stacked by kind of spend.
+ *
+ * Twelve rather than the full 24 held in the data: at two years the columns
+ * were too thin to read and the older half told a story the year-on-year chart
+ * beside it already tells. The current month is left out on purpose -- it is
+ * still being paid, and a part-month beside full ones reads as a drop that has
+ * not happened.
+ */
 export function TrendCard({ summary }: { summary: CeoSummary }) {
   const currency = summary.reporting_currency;
-  const { comparison } = summary;
+  const window = summary.paid_by_month.slice(-12);
+  const hasUsage = window.some((row) => row.usage > 0);
 
-  const trend = summary.paid_by_month.map((row) => ({
+  const series = hasUsage
+    ? [
+        { key: 'subscriptions', name: 'Subscriptions', colour: 'var(--series-1)' },
+        { key: 'usage', name: 'Cloud usage', colour: 'var(--series-2)' },
+      ]
+    : [{ key: 'subscriptions', name: 'Subscriptions', colour: 'var(--series-1)' }];
+
+  const points = window.map((row) => ({
     label: monthLabel(row.month),
+    // The year makes the label unique and is what the tooltip shows.
     fullLabel: monthLabel(row.month, true),
-    value: row.amount,
+    values: hasUsage ? [row.subscriptions, row.usage] : [row.subscriptions],
   }));
 
   return (
     <section className="card">
       <div className="card-head">
-        <h2>What we actually paid</h2>
-        <span className="hint">two years, from the ledger</span>
+        <h2>What we paid, month by month</h2>
+        <span className="hint">complete months, from the ledger</span>
       </div>
-      <div className="card-sub">
-        Complete months only — the current month is still being paid, and plotting a part-month
-        beside full ones would read as a drop that has not happened.
+      <StackedColumns points={points} series={series} currency={currency} />
+    </section>
+  );
+}
+
+/**
+ * This year to date against the same months last year, as running totals.
+ * Built here from the 24 months the summary already holds, so it is the same
+ * money as the chart beside it and cannot drift from it.
+ */
+export function YearCompareCard({ summary }: { summary: CeoSummary }) {
+  const currency = summary.reporting_currency;
+  const { comparison } = summary;
+
+  const latest = summary.latest_complete_month;
+  const currentYear = latest.slice(0, 4);
+  const previousYear = String(Number(currentYear) - 1);
+  const latestIndex = Number(latest.slice(5, 7)) - 1;
+
+  const byMonth = new Map(summary.paid_by_month.map((row) => [row.month, row.amount]));
+  const running = (year: string, through: number): Array<number | null> => {
+    let total = 0;
+    return MONTH_SHORT.map((_, i) => {
+      if (i > through) return null;
+      total += byMonth.get(`${year}-${String(i + 1).padStart(2, '0')}`) ?? 0;
+      return total;
+    });
+  };
+
+  const data: CumulativeInput = {
+    months: MONTH_SHORT,
+    current: running(currentYear, latestIndex),
+    // Last year runs the full twelve months: the second line shows where this
+    // year is heading, not just where it is.
+    previous: running(previousYear, 11),
+    currentLabel: currentYear,
+    previousLabel: previousYear,
+  };
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>This year against last</h2>
+        <span className="hint">running total</span>
       </div>
-
-      <AreaTrend points={trend} currency={currency} splitAt={12} />
-
-      {comparison.trailing_12 !== null ? (
+      <CumulativeCompare data={data} currency={currency} />
+      {comparison.trailing_12 !== null && comparison.previous_12 !== null ? (
         <div className="compare">
           <div className="compare-item">
-            <span className="compare-label">
-              {comparison.from ? monthLabel(comparison.from, true) : ''} –{' '}
-              {comparison.to ? monthLabel(comparison.to, true) : ''}
-            </span>
+            <span className="compare-label">Last 12 months</span>
             <span className="compare-value">
               <Money amount={comparison.trailing_12} currency={currency} />
             </span>
           </div>
           <div className="compare-item is-muted">
-            <span className="compare-label">The 12 months before</span>
+            <span className="compare-label">The 12 before</span>
             <span className="compare-value">
               <Money amount={comparison.previous_12} currency={currency} />
-            </span>
-          </div>
-          <div className="compare-item">
-            <span className="compare-label">Change</span>
-            <span className="compare-value">
-              <Delta pct={comparison.change_pct} />
             </span>
           </div>
         </div>
@@ -249,6 +315,9 @@ export function TrendCard({ summary }: { summary: CeoSummary }) {
 
 export function BiggestToolsCard({ summary }: { summary: CeoSummary }) {
   const currency = summary.reporting_currency;
+  // The whole the shares are shares of: every costed subscription, not just the
+  // eight shown, so the percentages say how concentrated the spend really is.
+  const whole = summary.by_category.reduce((sum, row) => sum + row.annual_reported, 0);
 
   return (
     <section className="card">
@@ -269,6 +338,7 @@ export function BiggestToolsCard({ summary }: { summary: CeoSummary }) {
                 : (row.sublabel ?? undefined),
           }))}
           currency={currency}
+          total={whole > 0 ? whole : undefined}
         />
       )}
     </section>
@@ -301,6 +371,7 @@ export function CategoryCard({
         <BarRows
           rows={summary.by_category.map((row) => ({ label: row.label, value: row.annual_reported }))}
           currency={currency}
+          total={summary.by_category.reduce((sum, row) => sum + row.annual_reported, 0)}
         />
       )}
       {uncosted.length > 0 ? (
@@ -410,124 +481,133 @@ export function ProductsCard({ summary }: { summary: CeoSummary }) {
 export function IdleSeatsCard({ summary }: { summary: CeoSummary }) {
   if (summary.idle_seat_cost === null || summary.idle_seat_cost <= 0) return null;
   const currency = summary.reporting_currency;
+  const listed = summary.idle_tools.reduce((sum, tool) => sum + tool.annual_reported, 0);
+  const more = summary.idle_seat_cost - listed;
 
   return (
     <section className="card">
       <div className="card-head">
         <h2>Seats nobody is using</h2>
+        <span className="hint">
+          <Link to="/tools">Right-size at renewal</Link>
+        </span>
       </div>
       <div className="reclaim">
         <span className="reclaim-value">{formatMoney(summary.idle_seat_cost, currency)}</span>
         <span className="reclaim-note">
           a year across {summary.idle_seat_count} paid{' '}
-          {summary.idle_seat_count === 1 ? 'seat' : 'seats'} with nobody on them. The one figure
-          here that is already recoverable — <Link to="/tools">right-size them</Link> at the next
-          renewal.
+          {summary.idle_seat_count === 1 ? 'seat' : 'seats'} with nobody on them — already
+          recoverable.
         </span>
       </div>
+      {summary.idle_tools.length > 0 ? (
+        <div style={{ marginTop: 12 }}>
+          {summary.idle_tools.map((tool) => (
+            <div className="idle-row" key={tool.id}>
+              <Link className="idle-name" to={`/tools/${tool.id}`}>
+                {tool.label}
+              </Link>
+              <SeatMeter used={tool.seats_used} purchased={tool.seats_purchased} />
+              <span className="idle-cost">{formatMoney(tool.annual_reported, currency)}</span>
+            </div>
+          ))}
+          {more > 0 ? (
+            <div className="cell-sub" style={{ paddingTop: 8 }}>
+              and {formatMoney(more, currency)} across smaller tools
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }
 
-// -------------------------------------------------------------- provenance
+// ------------------------------------------------------------------ method
 
-export function ProvenanceCard({ summary }: { summary: CeoSummary }) {
+/**
+ * Amounts left out for want of an exchange rate. This is the one part of "how
+ * the figures were made" that must not be quiet, so it sits directly under the
+ * headline and only appears when there is something to say.
+ */
+export function CoverageNotice({ summary }: { summary: CeoSummary }) {
   const currency = summary.reporting_currency;
 
+  if (!summary.fx_available) {
+    return (
+      <Banner tone="warning">
+        <span>
+          No exchange rates are stored yet, so anything not already in {currency} is missing from
+          these figures. <Link to="/settings">Fetch rates in Settings</Link> to complete them.
+        </span>
+      </Banner>
+    );
+  }
+  if (summary.gaps.length === 0) return null;
+
   return (
-    <section className="card is-quiet">
-      <div className="card-head">
-        <h2>How the spend figures were made</h2>
+    <Banner tone="warning">
+      <div>
+        <strong>Some amounts are missing from these figures.</strong> No exchange rate covered
+        them, so they were left out rather than guessed at.{' '}
+        <Link to="/settings">Fetch a wider range of rates</Link> to close the gap.
+        <div className="gap-list">
+          {summary.gaps.map((gap) => (
+            <Badge tone="warning" key={`${gap.currency}-${gap.month}`}>
+              {gap.currency}
+              {gap.month ? ` · ${gap.month}` : ''} · {gap.count}{' '}
+              {gap.count === 1 ? 'amount' : 'amounts'}
+            </Badge>
+          ))}
+        </div>
       </div>
+    </Banner>
+  );
+}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div className="rate-note">
-          <IconExchange size={14} />
-          <span>
-            Amounts not already in {currency} are converted at European Central Bank reference
-            rates. Run-rate figures use the latest month available; historical payments use the
-            month they were paid in, so a past year&rsquo;s total never changes.
-          </span>
-        </div>
+/**
+ * How the figures were made, as a footer.
+ *
+ * It stays on the dashboard because the basis of a number is part of the number
+ * -- but it is a short paragraph of small type, not a section. The one table
+ * that backs a chart is a click away rather than in the way.
+ */
+export function MethodFooter({ summary }: { summary: CeoSummary }) {
+  const currency = summary.reporting_currency;
+  const first = summary.rate_months[0];
+  const lastRate = summary.rate_months[summary.rate_months.length - 1];
 
-        {summary.rate_months.length > 0 ? (
-          <div className="rate-note">
-            <span>
-              Rates used span {summary.rate_months[0]} to{' '}
-              {summary.rate_months[summary.rate_months.length - 1]}.
-            </span>
-          </div>
-        ) : null}
-
-        {!summary.fx_available ? (
-          <Banner tone="warning">
-            <span>
-              No exchange rates are stored yet, so anything not already in {currency} is missing
-              from these figures. <Link to="/settings">Fetch rates in Settings</Link> to complete
-              them.
-            </span>
-          </Banner>
-        ) : summary.gaps.length > 0 ? (
-          <Banner tone="warning">
-            <div>
-              <strong>Some amounts are missing from these figures.</strong>
-              <div style={{ marginTop: 4 }}>
-                No exchange rate covered them, so they were left out rather than guessed at.
-              </div>
-              <div className="gap-list">
-                {summary.gaps.map((gap) => (
-                  <Badge tone="warning" key={`${gap.currency}-${gap.month}`}>
-                    {gap.currency}
-                    {gap.month ? ` · ${gap.month}` : ''} · {gap.count}{' '}
-                    {gap.count === 1 ? 'amount' : 'amounts'}
-                  </Badge>
-                ))}
-              </div>
-              <div style={{ marginTop: 8 }}>
-                <Link to="/settings">Fetch a wider range of rates</Link> to close the gap.
-              </div>
-            </div>
-          </Banner>
-        ) : (
-          <div className="rate-note">
-            <span>Every amount was converted; nothing is missing from these figures.</span>
-          </div>
-        )}
-
-        <div className="rate-note">
-          <span>
-            Running cost covers subscription, licence and cloud cash only. Staff time is not
-            included. Cloud usage is entered by hand each month and averaged over the last three
-            complete months, so it is an estimate rather than a commitment.
-          </span>
-        </div>
-
-        <details className="figures">
-          <summary>Paid by year, as figures</summary>
-          <div className="table-wrap" style={{ marginTop: 10 }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Year</th>
-                  <th className="num">Paid ({currency})</th>
+  return (
+    <footer className="method">
+      <p>
+        <strong>How these figures are made.</strong> Amounts not in {currency} are converted at
+        European Central Bank reference rates
+        {first && lastRate ? ` (${first} to ${lastRate})` : ''}: today&rsquo;s run rate at the
+        latest month, past payments at the month they were paid, so a closed year never changes.
+        Running cost is subscriptions, licences and cloud only — no staff time — and cloud usage is
+        entered monthly and averaged over the last three complete months, so it is an estimate. As
+        at {formatDate(summary.today)}.
+      </p>
+      <details>
+        <summary>Paid by year, as figures</summary>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Year</th>
+                <th className="num">Paid ({currency})</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.paid_by_year.map((row) => (
+                <tr key={row.year}>
+                  <td className="cell-primary">{row.year}</td>
+                  <td className="num">{formatMoney(row.amount, currency)}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {summary.paid_by_year.map((row) => (
-                  <tr key={row.year}>
-                    <td className="cell-primary">{row.year}</td>
-                    <td className="num">{formatMoney(row.amount, currency)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </details>
-
-        <div className="rate-note">
-          <span>As at {formatDate(summary.today)}.</span>
+              ))}
+            </tbody>
+          </table>
         </div>
-      </div>
-    </section>
+      </details>
+    </footer>
   );
 }

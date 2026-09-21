@@ -250,6 +250,13 @@ export interface RenewalTimelineEntry {
   tool_name: string;
   date: IsoDate;
   days_until: number;
+  /**
+   * The last day to cancel without being charged for another period. Null for a
+   * tool that does not auto-renew or has no notice period. It can be in the past
+   * while the renewal is still ahead: that is the window that has already closed.
+   */
+  notice_date: IsoDate | null;
+  notice_days_until: number | null;
   amount: number | null;
   currency: string;
   billing_cycle: BillingCycle;
@@ -301,6 +308,16 @@ export interface InternalProductCost {
   /** Fixed + usage. What the dashboard shows for this product. */
   monthly_reported: number | null;
   annual_reported: number | null;
+}
+
+/** A tool paying for seats nobody is using. */
+export interface IdleTool {
+  id: string;
+  label: string;
+  seats_purchased: number;
+  seats_used: number;
+  /** Annualised value of the idle seats, converted. */
+  annual_reported: number;
 }
 
 /** A ranked line in one of the concentration charts. */
@@ -367,8 +384,14 @@ export interface CeoSummary {
   total_annual_reported: number | null;
   /** Actually-paid spend by year, from the ledger, at each month's own rate. */
   paid_by_year: Array<{ year: string; amount: number }>;
-  /** Actually-paid spend per month, converted, for the trend. */
-  paid_by_month: Array<{ month: string; amount: number }>;
+  /**
+   * Actually-paid spend per month, converted, for the trend. `subscriptions` is
+   * what the payments ledger says was paid; `usage` is the recorded cloud
+   * costs. They are kept apart so the chart can show which one moved.
+   */
+  paid_by_month: Array<{ month: string; amount: number; subscriptions: number; usage: number }>;
+  /** The tools with the most idle-seat cost, biggest first. */
+  idle_tools: IdleTool[];
   /** Is spending rising or falling, on complete months only. */
   comparison: PeriodComparison;
   /** The costliest subscriptions, biggest first. */

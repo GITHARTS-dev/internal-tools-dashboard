@@ -99,70 +99,54 @@ export default function App() {
 
   return (
     <ToastProvider>
-      <div className="app">
-        <aside className="sidebar">
+      <div className="aurora" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+        <i />
+      </div>
+      <div className="shell">
+        <header className="topbar">
           <div className="brand">
             {/* Both marks ship; CSS shows the one that suits the surface. */}
-            <img
-              className="brand-logo on-light"
-              src="/harts-logo-on-light.png"
-              alt="HARTS"
-              width={109}
-              height={26}
-            />
-            <img
-              className="brand-logo on-dark"
-              src="/harts-logo-on-dark.png"
-              alt="HARTS"
-              width={109}
-              height={26}
-            />
-            <div className="brand-sub">Tools &amp; subscriptions</div>
+            <img className="brand-logo on-light" src="/harts-logo-on-light.png" alt="HARTS" width={109} height={26} />
+            <img className="brand-logo on-dark" src="/harts-logo-on-dark.png" alt="HARTS" width={109} height={26} />
+            <div className="brand-sub">Tools &amp;<br />subscriptions</div>
           </div>
 
           <nav className="nav" aria-label="Main">
-            <div>
-              <div className="nav-section">Overview</div>
-              <NavLink to="/" end className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-                <IconDashboard />
-                Dashboard
-                {attention > 0 ? (
-                  <span className="count" title={`${attention} urgent`}>
-                    {attention}
-                  </span>
-                ) : null}
-              </NavLink>
-            </div>
-            <div>
-              <div className="nav-section">Records</div>
-              <NavLink to="/tools" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-                <IconTools />
-                Tools
-              </NavLink>
-              <NavLink to="/products" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-                <IconProducts />
-                Our products
-              </NavLink>
-              <NavLink to="/payments" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-                <IconPayments />
-                Payments
-              </NavLink>
-              <NavLink to="/history" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-                <IconHistory />
-                History
-              </NavLink>
-            </div>
-            <div>
-              <div className="nav-section">Admin</div>
-              <NavLink to="/settings" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-                <IconSettings />
-                Settings
-              </NavLink>
-            </div>
+            <NavLink to="/" end className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+              <IconDashboard />
+              Dashboard
+              {attention > 0 ? (
+                <span className="count" title={`${attention} urgent`}>
+                  {attention}
+                </span>
+              ) : null}
+            </NavLink>
+            <NavLink to="/tools" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+              <IconTools />
+              Tools
+            </NavLink>
+            <NavLink to="/products" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+              <IconProducts />
+              Our products
+            </NavLink>
+            <NavLink to="/payments" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+              <IconPayments />
+              Payments
+            </NavLink>
+            <NavLink to="/history" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+              <IconHistory />
+              History
+            </NavLink>
+            <NavLink to="/settings" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+              <IconSettings />
+              Settings
+            </NavLink>
           </nav>
 
-          <div style={{ marginTop: 'auto' }}>
-            <div className="nav-section">Appearance</div>
+          <div className="topbar-meta">
             <div className="seg" role="group" aria-label="Colour theme">
               {(['system', 'light', 'dark'] as const).map((option) => (
                 <button
@@ -176,15 +160,15 @@ export default function App() {
               ))}
             </div>
           </div>
-        </aside>
+        </header>
 
-        <div className="main">
-          <header className="topbar">
+        <main className="content">
+          <div className="pagehead">
             <div>
               <h1>{title}</h1>
               {subtitle ? <div className="subtitle">{subtitle}</div> : null}
             </div>
-            <div className="topbar-meta">
+            <div className="pagehead-meta">
               {api.isDemo ? (
                 <span className="badge warning" title="Edits are kept in memory only">
                   Demo · edits reset on reload
@@ -192,36 +176,33 @@ export default function App() {
               ) : null}
               {asAt ? <span className="as-at">As at {formatDate(asAt)}</span> : null}
             </div>
-          </header>
-
-          <main className="content">
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              {/* The cost summary was folded into the dashboard; keep old links working. */}
-              <Route path="/summary" element={<Navigate to="/" replace />} />
-              <Route path="/products" element={<Products />} />
-              <Route path="/products/:id" element={<ProductDetail />} />
-              <Route path="/tools" element={<Tools />} />
-              <Route path="/tools/new" element={<ToolForm />} />
-              <Route path="/tools/:id" element={<ToolDetail />} />
-              <Route path="/tools/:id/edit" element={<ToolForm />} />
-              <Route path="/payments" element={<Payments />} />
-              <Route path="/history" element={<History />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route
-                path="*"
-                element={
-                  <div className="card">
-                    <div className="empty">
-                      <span className="empty-title">Page not found</span>
-                      <span>That link does not match any screen in this app.</span>
-                    </div>
+          </div>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            {/* The cost summary was folded into the dashboard; keep old links working. */}
+            <Route path="/summary" element={<Navigate to="/" replace />} />
+            <Route path="/products" element={<Products />} />
+            <Route path="/products/:id" element={<ProductDetail />} />
+            <Route path="/tools" element={<Tools />} />
+            <Route path="/tools/new" element={<ToolForm />} />
+            <Route path="/tools/:id" element={<ToolDetail />} />
+            <Route path="/tools/:id/edit" element={<ToolForm />} />
+            <Route path="/payments" element={<Payments />} />
+            <Route path="/history" element={<History />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route
+              path="*"
+              element={
+                <div className="card">
+                  <div className="empty">
+                    <span className="empty-title">Page not found</span>
+                    <span>That link does not match any screen in this app.</span>
                   </div>
-                }
-              />
-            </Routes>
-          </main>
-        </div>
+                </div>
+              }
+            />
+          </Routes>
+        </main>
       </div>
     </ToastProvider>
   );

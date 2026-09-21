@@ -295,7 +295,60 @@ export default function Settings() {
 
       <DryRunPanel />
       <ImportPanel onDone={reload} />
+      <ChangeLogPanel />
     </>
+  );
+}
+
+/**
+ * Who changed what, newest first. It lives here rather than on the dashboard: it
+ * is an audit trail to consult when something looks wrong, not something to read
+ * on arrival.
+ */
+const CHANGES_SHOWN = 20;
+
+function ChangeLogPanel() {
+  const { data, error, loading } = useAsync(() => api.audit(), []);
+  const [all, setAll] = useState(false);
+  const entries = data?.audit ?? [];
+  const visible = all ? entries : entries.slice(0, CHANGES_SHOWN);
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Change log</h2>
+        <span className="hint">every edit, newest first</span>
+      </div>
+      {loading && !data ? (
+        <Loading rows={3} />
+      ) : error ? (
+        <Banner tone="warning">{error}</Banner>
+      ) : entries.length === 0 ? (
+        <EmptyState title="No changes recorded yet" compact />
+      ) : (
+        <>
+          {visible.map((entry) => (
+            <div key={entry.id} className="audit-item">
+              <span className="audit-when">{formatDate(entry.created_at.slice(0, 10))}</span>
+              <span className="audit-change">
+                {entry.summary ?? entry.action} ·{' '}
+                <span style={{ color: 'var(--text-muted)' }}>{entry.actor}</span>
+              </span>
+            </div>
+          ))}
+          {entries.length > CHANGES_SHOWN ? (
+            <button
+              type="button"
+              className="btn subtle"
+              style={{ marginTop: 10 }}
+              onClick={() => setAll((current) => !current)}
+            >
+              {all ? 'Show fewer' : `Show all ${entries.length}`}
+            </button>
+          ) : null}
+        </>
+      )}
+    </section>
   );
 }
 

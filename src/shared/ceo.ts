@@ -22,6 +22,7 @@ import { addMonthsToYearMonth, monthOf, sumConverted, type RateTable, type YearM
 import { computeProductUsage, costEntryDue } from './productCosts';
 import type {
   CeoSummary,
+  IdleTool,
   InternalProduct,
   InternalProductCost,
   IsoDate,
@@ -247,21 +248,24 @@ export function computeCeoSummary(input: CeoSummaryInput): CeoSummary {
   // ------------------------------------------------------- monthly trend
   // Per-month paid totals, each at its own month's rate. This is the series
   // that answers "is this going up", which no other number on the page does.
-  const monthTotals = new Map<YearMonth, Array<{ amount: number; currency: string; month: YearMonth }>>();
+  type Entry = { amount: number; currency: string; month: YearMonth };
+  const subsByMonth = new Map<YearMonth, Entry[]>();
+  const usageByMonth = new Map<YearMonth, Entry[]>();
+  const add = (map: Map<YearMonth, Entry[]>, month: YearMonth, entry: Entry) => {
+    const bucket = map.get(month);
+    if (bucket) bucket.push(entry);
+    else map.set(month, [entry]);
+  };
+
   for (const payment of payments) {
     if (payment.status !== 'paid' || !payment.paid_on) continue;
     const month = monthOf(payment.paid_on);
-    const entry = { amount: payment.amount, currency: payment.currency, month };
-    const bucket = monthTotals.get(month);
-    if (bucket) bucket.push(entry);
-    else monthTotals.set(month, [entry]);
+    add(subsByMonth, month, { amount: payment.amount, currency: payment.currency, month });
   }
-
+  // Recorded cloud costs are money actually spent, but they are a different kind
+  // of money from a subscription, so they are kept in their own series.
   for (const cost of monthlyCosts) {
-    const entry = { amount: cost.amount, currency: cost.currency, month: cost.month };
-    const bucket = monthTotals.get(cost.month);
-    if (bucket) bucket.push(entry);
-    else monthTotals.set(cost.month, [entry]);
+    add(usageByMonth, cost.month, { amount: cost.amount, currency: cost.currency, month: cost.month });
   }
 
   const thisMonth = monthOf(today);
@@ -270,21 +274,26 @@ export function computeCeoSummary(input: CeoSummaryInput): CeoSummary {
   const lastComplete = addMonthsToYearMonth(thisMonth, -1);
   const windowStart = addMonthsToYearMonth(lastComplete, -23);
 
-  const paidByMonth: Array<{ month: string; amount: number }> = [];
+  /** Convert one month's entries, folding any gaps into the shared report. */
+  function sumMonth(entries: Entry[] | undefined): number {
+    if (!entries || entries.length === 0) return 0;
+    const result = sumConverted(entries, target, tables);
+    for (const month2 of result.months) monthsUsed.add(month2);
+    for (const gap of result.gaps) {
+      const key = `${gap.currency}::${gap.month ?? ''}`;
+      const existing = gaps.get(key);
+      if (existing) existing.count += gap.count;
+      else gaps.set(key, { ...gap });
+    }
+    return result.amount;
+  }
+
+  const paidByMonth: Array<{ month: string; amount: number; subscriptions: number; usage: number }> = [];
   for (let i = 0; i < 24; i++) {
     const month = addMonthsToYearMonth(windowStart, i);
-    const entries = monthTotals.get(month) ?? [];
-    const result = entries.length > 0 ? sumConverted(entries, target, tables) : null;
-    if (result) {
-      for (const month2 of result.months) monthsUsed.add(month2);
-      for (const gap of result.gaps) {
-        const key = `${gap.currency}::${gap.month ?? ''}`;
-        const existing = gaps.get(key);
-        if (existing) existing.count += gap.count;
-        else gaps.set(key, { ...gap });
-      }
-    }
-    paidByMonth.push({ month, amount: result?.amount ?? 0 });
+    const subscriptions = sumMonth(subsByMonth.get(month));
+    const usage = sumMonth(usageByMonth.get(month));
+    paidByMonth.push({ month, amount: subscriptions + usage, subscriptions, usage });
   }
 
   // Two 12-month windows of complete months, so the comparison is like for like.
@@ -351,14 +360,31 @@ export function computeCeoSummary(input: CeoSummaryInput): CeoSummary {
 
   // ------------------------------------------------------------ idle seats
   const idleBucket: Record<string, number> = {};
+  const idleTools: IdleTool[] = [];
   let idleSeats = 0;
   for (const tool of liveTools) {
     const perPeriod = wastedSeatCost(tool.cost_amount, tool.seats_purchased, tool.seats_used);
-    addTo(idleBucket, tool.currency, annualisedCost(perPeriod, tool.billing_cycle));
+    const annualIdle = annualisedCost(perPeriod, tool.billing_cycle);
+    addTo(idleBucket, tool.currency, annualIdle);
     if (tool.seats_purchased && tool.seats_used !== null) {
       idleSeats += Math.max(0, tool.seats_purchased - tool.seats_used);
+
+      // Which tools the idle money is in is the actionable half of the figure.
+      if (annualIdle && tool.seats_purchased > tool.seats_used) {
+        const reported = reportOne(annualIdle, tool.currency);
+        if (reported !== null && reported > 0) {
+          idleTools.push({
+            id: tool.id,
+            label: tool.name,
+            seats_purchased: tool.seats_purchased,
+            seats_used: tool.seats_used,
+            annual_reported: reported,
+          });
+        }
+      }
     }
   }
+  idleTools.sort((a, b) => b.annual_reported - a.annual_reported || a.label.localeCompare(b.label));
 
   return {
     today,
@@ -384,6 +410,7 @@ export function computeCeoSummary(input: CeoSummaryInput): CeoSummary {
     comparison,
     top_tools: topTools,
     by_category: byCategory,
+    idle_tools: idleTools.slice(0, 5),
     idle_seat_cost: reportTotal(idleBucket),
     idle_seat_count: idleSeats,
     gaps: [...gaps.values()].sort((a, b) => b.count - a.count),

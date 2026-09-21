@@ -7,21 +7,23 @@ import { AlertList, Banner, Loading } from '../components/ui';
 import {
   BiggestToolsCard,
   CategoryCard,
+  CoverageNotice,
   IdleSeatsCard,
+  MethodFooter,
   ProductsCard,
-  ProvenanceCard,
   SpendLead,
   TrendCard,
+  YearCompareCard,
 } from '../components/spend';
-import { formatDate } from '../../shared/dates';
 
 /**
  * One page, two jobs, in the order they should be done.
  *
- * What is due comes before what was spent: the alert list and the renewals sit
- * directly under the opening figure, and the spend analysis follows. The admin
+ * The headline figure opens the page, then what is due beside what can be
+ * reclaimed, then how spend has moved, then where it is concentrated. The admin
  * who opens this daily lands on what needs doing; the CEO who opens it weekly
- * gets the headline number first and the analysis below it.
+ * gets the number first and the analysis under it. The change log lives in
+ * Settings -- it is an audit trail, not something to read on arrival.
  *
  * The two halves load independently. The alerts are the part that must never
  * be unavailable, so a failure fetching the cost figures leaves them in place
@@ -40,7 +42,7 @@ export default function Dashboard() {
   if (error) return <Banner tone="critical">{error}</Banner>;
   if (!data) return null;
 
-  const { kpis, alerts, category_spend, renewal_timeline, recent_activity } = data;
+  const { kpis, alerts, category_spend, renewal_timeline } = data;
   const urgent = alerts.filter((a) => a.severity === 'critical');
   const visibleAlerts = showAllAlerts ? alerts : alerts.slice(0, ALERTS_SHOWN);
 
@@ -76,7 +78,10 @@ export default function Dashboard() {
       )}
 
       {summary ? (
-        <SpendLead summary={summary} native={kpis.annualised_spend} />
+        <>
+          <SpendLead summary={summary} native={kpis.annualised_spend} />
+          <CoverageNotice summary={summary} />
+        </>
       ) : spend.error ? (
         <Banner tone="warning">
           <span>
@@ -87,89 +92,75 @@ export default function Dashboard() {
           </span>
         </Banner>
       ) : (
-        <div className="skeleton" style={{ height: 150 }} aria-label="Loading spend figures" />
+        <div className="skeleton" style={{ height: 220 }} aria-label="Loading spend figures" />
       )}
 
-      <section className="card">
-        <div className="card-head">
-          <h2>Needs attention</h2>
-          {/* The date lives in the statement header; this says the window. */}
-          <span className="hint">{data.timezone}</span>
-        </div>
-        <AlertList
-          alerts={visibleAlerts}
-          // A product alert opens the product, where the cost is entered.
-          onOpen={(alert) =>
-            navigate(alert.product_id ? `/products/${alert.product_id}` : `/tools/${alert.tool_id}`)
-          }
-        />
-        {alerts.length > ALERTS_SHOWN ? (
-          <button
-            type="button"
-            className="btn subtle"
-            style={{ marginTop: 10 }}
-            onClick={() => setShowAllAlerts((current) => !current)}
-          >
-            {showAllAlerts
-              ? 'Show fewer'
-              : `Show all ${alerts.length} — ${alerts.length - ALERTS_SHOWN} more`}
-          </button>
-        ) : null}
-      </section>
-
-      <div className="grid grid-2">
+      <div className="grid grid-main">
         <section className="card">
           <div className="card-head">
-            <h2>Renewals ahead</h2>
-            <span className="hint">next 90 days</span>
+            <h2>Needs attention</h2>
+            <span className="hint">{alerts.length === 0 ? 'all clear' : `${alerts.length} flagged`}</span>
           </div>
-          <RenewalTimeline
-            items={renewal_timeline.map((entry) => ({
-              id: entry.tool_id,
-              name: entry.tool_name,
-              date: entry.date,
-              daysUntil: entry.days_until,
-              amount: entry.amount,
-              currency: entry.currency,
-            }))}
+          <AlertList
+            alerts={visibleAlerts}
+            // A product alert opens the product, where the cost is entered.
+            onOpen={(alert) =>
+              navigate(alert.product_id ? `/products/${alert.product_id}` : `/tools/${alert.tool_id}`)
+            }
           />
+          {alerts.length > ALERTS_SHOWN ? (
+            <button
+              type="button"
+              className="btn subtle"
+              style={{ marginTop: 10 }}
+              onClick={() => setShowAllAlerts((current) => !current)}
+            >
+              {showAllAlerts
+                ? 'Show fewer'
+                : `Show all ${alerts.length} — ${alerts.length - ALERTS_SHOWN} more`}
+            </button>
+          ) : null}
         </section>
 
-        {summary ? <BiggestToolsCard summary={summary} /> : null}
+        <div className="stack">
+          <section className="card">
+            <div className="card-head">
+              <h2>Renewals ahead</h2>
+              <span className="hint">next 90 days</span>
+            </div>
+            <RenewalTimeline
+              items={renewal_timeline.map((entry) => ({
+                id: entry.tool_id,
+                name: entry.tool_name,
+                date: entry.date,
+                daysUntil: entry.days_until,
+                amount: entry.amount,
+                currency: entry.currency,
+                noticeDate: entry.notice_date,
+                noticeDaysUntil: entry.notice_days_until,
+              }))}
+            />
+          </section>
+          {summary ? <IdleSeatsCard summary={summary} /> : null}
+        </div>
       </div>
 
-      {summary ? <TrendCard summary={summary} /> : null}
-
       {summary ? (
-        <div className="grid grid-2">
-          <CategoryCard summary={summary} uncosted={uncosted} />
-          <div className="stack">
-            <IdleSeatsCard summary={summary} />
-            <ProductsCard summary={summary} />
-          </div>
+        <div className="grid grid-main">
+          <TrendCard summary={summary} />
+          <YearCompareCard summary={summary} />
         </div>
       ) : null}
 
-      {recent_activity.length > 0 ? (
-        <section className="card">
-          <div className="card-head">
-            <h2>Recent changes</h2>
-          </div>
-          <div>
-            {recent_activity.slice(0, 8).map((entry) => (
-              <div key={entry.id} className="audit-item">
-                <span className="audit-when">{formatDate(entry.created_at.slice(0, 10))}</span>
-                <span className="audit-change">
-                  {entry.summary ?? entry.action} ·{' '}
-                  <span style={{ color: 'var(--text-muted)' }}>{entry.actor}</span>
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
+      {summary ? (
+        <div className="grid grid-3">
+          <BiggestToolsCard summary={summary} />
+          <CategoryCard summary={summary} uncosted={uncosted} />
+          <ProductsCard summary={summary} />
+        </div>
       ) : null}
 
-      {summary ? <ProvenanceCard summary={summary} /> : null}
+      {summary ? <MethodFooter summary={summary} /> : null}
     </>
   );
 }

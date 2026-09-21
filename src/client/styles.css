@@ -229,6 +229,11 @@ a { color: inherit; text-decoration: none; }
 .brand {
   display: flex;
   flex-direction: column;
+  /* Without this, flex's default `align-items: stretch` forces the logo's
+     `width: auto` to fill the sidebar's full cross-axis width, and the
+     default `object-fit: fill` on <img> then smears the raster pixels
+     non-uniformly to match -- the stretched logo. */
+  align-items: flex-start;
   gap: 6px;
   padding: 0 8px;
 }
@@ -609,9 +614,26 @@ input[type='checkbox'] { min-width: auto; accent-color: var(--series-1); width: 
  */
 .lead {
   padding: 4px 2px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 16px 56px;
+  align-items: start;
+}
+.lead-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+/*
+ * The breakdown sits level with the figure, not under it. That is what keeps
+ * the whole lead to about 150px on a wide screen: it shares the top of the page
+ * with the alerts and must not push them below the fold. The top padding lines
+ * its first row up with the figure rather than with the small label above it.
+ */
+.lead-side { padding-top: 24px; min-width: 0; }
+.lead-side .split-key { grid-template-columns: 1fr; gap: 14px; margin-top: 14px; }
+.lead-side .proportion { margin-top: 0; }
+
+@media (max-width: 900px) {
+  .lead { grid-template-columns: 1fr; gap: 6px; }
+  .lead-side { padding-top: 10px; }
 }
 
 .lead-label {
@@ -664,6 +686,14 @@ input[type='checkbox'] { min-width: auto; accent-color: var(--series-1); width: 
 }
 .lead-actual .delta { font-size: 14px; }
 
+/* The exact per-currency figures the headline was converted from. */
+.lead-native {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /*
  * Direction of travel. Spending more is not automatically bad, so this uses
  * the neutral text tokens and the series hues rather than the good/critical
@@ -680,7 +710,6 @@ input[type='checkbox'] { min-width: auto; accent-color: var(--series-1); width: 
 .delta.is-flat { color: var(--text-muted); font-weight: 550; }
 .delta svg { flex-shrink: 0; }
 
-.lead-split { margin-top: 18px; }
 
 .split-key {
   display: grid;
@@ -729,6 +758,9 @@ input[type='checkbox'] { min-width: auto; accent-color: var(--series-1); width: 
 }
 .reclaim-note { font-size: 13px; color: var(--text-secondary); max-width: 70ch; }
 
+/* Two short cards sharing one grid cell, so they match a tall neighbour. */
+.stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
 /* A card that should recede: provenance, not findings. */
 .card.is-quiet { background: transparent; border-style: dashed; }
 .card.is-quiet h2 { font-size: 14px; color: var(--text-secondary); }
@@ -745,31 +777,6 @@ input[type='checkbox'] { min-width: auto; accent-color: var(--series-1); width: 
 
 /* ------------------------------------------------------- summary split */
 
-.split {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 1px;
-  background: var(--grid);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.split-part {
-  background: var(--surface-1);
-  padding: 18px;
-  display: flex; flex-direction: column; gap: 4px;
-}
-.split-part .label {
-  font-size: 12px; font-weight: 600; color: var(--text-secondary);
-  display: flex; align-items: center; gap: 6px;
-}
-.split-part .label svg { color: var(--text-muted); }
-.split-part .value {
-  font-size: 28px; font-weight: 650; letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums; line-height: 1.15;
-}
-.split-part .note { font-size: 12px; color: var(--text-muted); }
-.split-part.is-total { background: var(--surface-2); }
 
 /*
  * Proportion bar: how the run rate divides between bought tools and our own
@@ -784,12 +791,6 @@ input[type='checkbox'] { min-width: auto; accent-color: var(--series-1); width: 
 .proportion .bought { background: var(--series-1); }
 .proportion .internal { background: var(--series-2); }
 
-.proportion-key {
-  display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px;
-  font-size: 12px; color: var(--text-secondary);
-}
-.proportion-key .key-item { display: inline-flex; align-items: center; gap: 6px; }
-.proportion-key .key-swatch { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
 
 /* -------------------------------------------------------- product rows */
 
@@ -868,6 +869,6 @@ input[type='checkbox'] { min-width: auto; accent-color: var(--series-1); width: 
   .content, .topbar { padding-left: 16px; padding-right: 16px; }
   .content { padding-top: 18px; }
 
-  .split { grid-template-columns: 1fr; }
-  .split-part .value { font-size: 24px; }
+  
+  
 }

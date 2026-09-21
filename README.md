@@ -14,8 +14,9 @@ It answers three questions that currently have no home:
    renewal, before a payment is due, and — the one people actually miss —
    before the last day to cancel without being charged for another period. On a
    day when nothing is due, it posts nothing.
-4. **What does all of it come to?** A cost summary in one currency, splitting
-   what we buy from what it costs to run our own products.
+4. **What does all of it come to?** One figure in one currency at the top of the
+   dashboard, splitting what we buy from what it costs to run our own products,
+   with the trend and where the money is concentrated underneath.
 
 > **Status: not deployed.** This runs entirely on your own machine while the
 > features and design are reviewed. It needs no cloud account, no credit card
@@ -112,7 +113,7 @@ and records nothing. It is always safe to run, including against real data.
   Never floats: `0.1 + 0.2 !== 0.3` is not an acceptable property for something
   that decides whether a bill is paid.
 - **Amounts keep their own currency** everywhere except where a single combined
-  figure is genuinely needed (the cost summary). There, each amount is converted
+  figure is genuinely needed (the spend figures at the top of the dashboard). There, each amount is converted
   at the ECB reference rate of the month it belongs to — never today's rate —
   so a past year's total is the same number every time it is asked for. Anything
   with no usable rate is left out of the total and named on screen rather than

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { ToastProvider } from './components/ui';
 import { api } from './lib/api';
 import Dashboard from './pages/Dashboard';
@@ -9,7 +9,6 @@ import ToolForm from './pages/ToolForm';
 import Payments from './pages/Payments';
 import History from './pages/History';
 import Settings from './pages/Settings';
-import CostSummary from './pages/CostSummary';
 import Products from './pages/Products';
 import ProductDetail from './pages/ProductDetail';
 import {
@@ -18,7 +17,6 @@ import {
   IconPayments,
   IconProducts,
   IconSettings,
-  IconSummary,
   IconTools,
 } from './components/icons';
 
@@ -51,8 +49,7 @@ function useTheme() {
 }
 
 const TITLES: Array<[RegExp, string, string]> = [
-  [/^\/$/, 'Dashboard', 'What needs attention right now'],
-  [/^\/summary$/, 'Cost summary', 'Everything we spend, in one currency'],
+  [/^\/$/, 'Dashboard', 'What needs attention, and what it costs'],
   [/^\/tools\/new$/, 'Add a tool', 'Record a new subscription'],
   [/^\/tools\/[^/]+\/edit$/, 'Edit tool', 'Update this subscription'],
   [/^\/tools\/[^/]+$/, 'Tool', 'Subscription detail'],
@@ -129,10 +126,6 @@ export default function App() {
                   </span>
                 ) : null}
               </NavLink>
-              <NavLink to="/summary" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-                <IconSummary />
-                Cost summary
-              </NavLink>
             </div>
             <div>
               <div className="nav-section">Records</div>
@@ -197,7 +190,8 @@ export default function App() {
           <main className="content">
             <Routes>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/summary" element={<CostSummary />} />
+              {/* The cost summary was folded into the dashboard; keep old links working. */}
+              <Route path="/summary" element={<Navigate to="/" replace />} />
               <Route path="/products" element={<Products />} />
               <Route path="/products/:id" element={<ProductDetail />} />
               <Route path="/tools" element={<Tools />} />

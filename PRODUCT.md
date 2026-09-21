@@ -18,7 +18,7 @@ Planned scope extension: also track the running cost of the company's own intern
 Not a generic spend dashboard: it is built around the moments that cost money by surprise (the cancellation-notice deadline, idle paid seats, unowned records) and keeps an immutable history, so "what did X cost us last year" is always answerable.
 
 ## Operating Context
-Runs locally today; deployment is deliberately on hold. The current build targets Cloudflare Worker + D1 (with Cloudflare Access for M365 sign-in); an alternative under consideration is Supabase plus an Azure Static Web App with Azure Functions, whichever is free or close to it, falling back to Cloudflare. Reminders go to Teams webhook and/or email via a daily cron. Data can be loaded by CSV import with a preview step. Two currencies are in use (INR and USD).
+Runs locally today; nothing is deployed yet. The deployment target is decided: Azure Static Web Apps (Free plan) with its managed Azure Functions for the API, Supabase Postgres for data, and Static Web Apps' built-in Entra sign-in. This was chosen to match the environment the company's other internal tools already use (the timesheet tracker runs on the same Supabase + SWA + managed Functions stack), so there is one deploy story and one set of credentials across them. The daily reminder check runs from a scheduled GitHub Actions workflow, because SWA's managed Functions are HTTP-only and have no timer trigger. Reminders go to a Teams webhook and/or email. Data can be loaded by CSV import with a preview step. Two currencies are in use (INR and USD).
 
 ## Capabilities and Constraints
 - Tools, payments ledger, audit history, alert engine (single source of truth for "needs attention"), dashboard KPIs and charts, CSV import/export, reminder dry-run preview.
@@ -27,15 +27,15 @@ Runs locally today; deployment is deliberately on hold. The current build target
 - Internal products are modelled as buckets that ordinary tools are attributed to, so their running cost is a roll-up of the existing ledger rather than a second one. Cost covers subscription and licence cash only; people and staff-time cost is explicitly excluded and has nowhere to be recorded.
 - Nothing is deleted; cancelled tools are archived with history.
 - No sign-in in the app itself yet.
-- Undecided: whether invoices are stored or only amounts; the deployment platform (on hold).
+- Undecided: whether invoices are stored or only amounts.
 
 ## Brand Commitments
-Must follow HARTS branding. The user supplies the brand material; do not invent any beyond it. The official logo is in `public/`: `image (20).png` (black wordmark, for light backgrounds) and `image (21).png` (white wordmark, for dark backgrounds); the mark is a four-colour (red-orange, green, amber, blue) ring of figures around a yellow star. No brand guide (colours, typefaces, voice) has been supplied yet. The user also explicitly does not want it to look like a standard AI-made dashboard.
+Must follow HARTS branding. The user supplies the brand material; do not invent any beyond it. The official logo is in `public/`: `harts-logo-on-light.png` (black wordmark) and `harts-logo-on-dark.png` (white wordmark); the mark is a four-colour (red-orange, green, amber, blue) ring of figures around a yellow star. No brand guide (colours, typefaces, voice) has been supplied yet. The user also explicitly does not want it to look like a standard AI-made dashboard.
 
 ## Evidence on Hand
 Demo seed data (seed/dev-seed.sql) is deliberately messy and fictional, not real company data. The only HARTS brand assets in the repository are the two logo files above; no brand guide exists yet, so palette and type must not be presented as official HARTS values. The accent tokens in `src/client/styles.css` are sampled from the logo and labelled as such.
 
-Reminder delivery is coded and unproven: no Teams channel or webhook URL exists yet, and no deployment has happened. `DEPLOYMENT.md` holds the runbook for both.
+Reminder delivery is coded and unproven: no Teams channel or webhook URL exists yet, and no deployment has happened. `DEPLOYMENT.md` holds the runbook.
 
 ## Product Principles
 1. Surface what needs action before what is merely interesting.

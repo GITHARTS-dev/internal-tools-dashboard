@@ -8,14 +8,14 @@ import { importExportRoutes } from './routes/importExport';
 import { documentsRoutes } from './routes/documents';
 import { fxRoutes } from './routes/fx';
 import { internalProductRoutes } from './routes/internalProducts';
-import { runReminders } from './reminders';
-import { refreshRatesIfDue } from './fx/refresh';
 
 /**
- * The Worker: API + scheduled reminder job.
+ * The API.
  *
- * Static assets (the React app) are served by the Workers runtime itself from
- * the `assets` binding in wrangler.jsonc, so there is no asset handling here.
+ * Host-agnostic on purpose: this module knows nothing about Azure, and the two
+ * adapters beside it (azure.ts for production, dev.ts for local work) know
+ * nothing about the routes. Static assets are served by Static Web Apps, not
+ * from here.
  */
 
 export const app = new Hono<{ Bindings: Env }>();
@@ -40,7 +40,7 @@ app.notFound((c) =>
 );
 
 app.onError((error, c) => {
-  // Surfaced in the wrangler console; the client gets a message it can show.
+  // Surfaced in the host's logs; the client gets a message it can show.
   console.error('Unhandled error:', error);
   return c.json(
     { error: 'server_error', message: error instanceof Error ? error.message : 'Something went wrong.' },
@@ -48,42 +48,12 @@ app.onError((error, c) => {
   );
 });
 
-export default {
-  fetch: app.fetch,
-
-  /**
-   * The daily job. Configured in wrangler.jsonc to fire at 03:00 UTC
-   * (08:30 IST). While deployment is on hold this never fires on its own --
-   * the same job is reachable at /api/reminders/dry-run to preview, and
-   * /api/reminders/run to execute on demand.
-   *
-   * Rates are refreshed before reminders so that a message quoting a converted
-   * total uses the same numbers the dashboard will show that morning. A rate
-   * failure is logged and stepped over: the ECB being unreachable must never
-   * stop a renewal reminder going out.
-   */
-  async scheduled(_controller: unknown, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }) {
-    const vars: Record<string, string | undefined> = {};
-    for (const [key, value] of Object.entries(env)) {
-      if (typeof value === 'string') vars[key] = value;
-    }
-
-    ctx.waitUntil(
-      (async () => {
-        try {
-          const fx = await refreshRatesIfDue(env.DB);
-          if (fx.refreshed) console.log(`FX: saved ${fx.saved} rate(s) up to ${fx.to}`);
-        } catch (error) {
-          console.error('FX refresh failed (reminders continue):', error);
-        }
-
-        try {
-          const run = await runReminders(env.DB, vars);
-          console.log(`Reminder run for ${run.today}: ${run.alerts.length} alert(s)`);
-        } catch (error) {
-          console.error('Reminder run failed:', error);
-        }
-      })(),
-    );
-  },
-};
+/*
+ * There is no default export any more.
+ *
+ * On Workers, the runtime imported `{ fetch, scheduled }` from this module.
+ * Azure Functions has no equivalent convention: src/server/azure.ts registers
+ * the HTTP handler explicitly, and the daily job is an ordinary POST to
+ * /api/reminders/run made by the scheduler -- which is why the FX refresh that
+ * used to live in `scheduled()` now runs inside that route.
+ */

@@ -14,7 +14,7 @@ type Row = Record<string, unknown>;
 
 export async function listInternalProducts(db: Db): Promise<InternalProduct[]> {
   const { results } = await db
-    .prepare('SELECT * FROM internal_products ORDER BY name COLLATE NOCASE')
+    .prepare('SELECT * FROM internal_products ORDER BY LOWER(name)')
     .all<Row>();
   return results as unknown as InternalProduct[];
 }

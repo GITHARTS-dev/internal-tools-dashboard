@@ -7,3 +7,6 @@ dist/
 test-results/
 playwright-report/
 tmp/
+
+# local dev database
+.data/

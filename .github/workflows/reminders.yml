@@ -1,0 +1,52 @@
+# The daily reminder check.
+#
+# This is the heartbeat, not the message. It asks "is anything crossing a
+# reminder threshold today?" and sends a Teams card only when the answer is
+# yes. On a quiet day it posts nothing at all -- the notification log's unique
+# dedupe_key is what guarantees the same alert never goes out twice.
+#
+# It lives here rather than in Azure because Static Web Apps' managed Functions
+# are HTTP-only: they have no timer trigger. A scheduled workflow calling the
+# endpoint is free, visible next to the code, and can be run by hand from the
+# Actions tab when someone wants to test a freshly pasted webhook.
+
+name: Send due reminders
+
+on:
+  schedule:
+    # 03:00 UTC == 08:30 IST, before the working day starts.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger the reminder run
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          REMINDER_TOKEN: ${{ secrets.REMINDER_TOKEN }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$REMINDER_TOKEN" ]; then
+            echo "::error::APP_URL and REMINDER_TOKEN must both be set as repository secrets."
+            exit 1
+          fi
+
+          # --fail-with-body so a non-2xx is a failed run with the reason
+          # visible, rather than a green tick over a silent outage.
+          curl --silent --show-error --fail-with-body \
+               --max-time 120 \
+               --retry 3 --retry-delay 20 --retry-all-errors \
+               -X POST "$APP_URL/api/reminders/run" \
+               -H "x-reminder-token: $REMINDER_TOKEN" \
+               -o response.json
+
+          echo "Reminder run completed."
+          # Surface what was sent, so the Actions log is the audit trail.
+          node -e "
+            const r = require('./response.json');
+            console.log('Date:', r.today, '| alerts:', r.alerts.length);
+            for (const c of r.alert_dispatch.channels) {
+              console.log(\`  \${c.channel}: \${c.status} — \${c.detail}\`);
+            }
+          "

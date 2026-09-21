@@ -15,9 +15,6 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    // Lets `import seedSql from '...dev-seed.sql'` be typed by the
-    // dev-seed.d.sql.ts sidecar; the bundler turns the .sql into text.
-    "allowArbitraryExtensions": true,
     "isolatedModules": true,
     "noEmit": true,
     "types": ["node"],

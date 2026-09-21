@@ -60,7 +60,7 @@ export async function listTools(db: Db, filters: ToolFilters = {}): Promise<Tool
     params.push(like, like, like, like);
   }
 
-  const sql = `SELECT * FROM tools ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY name COLLATE NOCASE`;
+  const sql = `SELECT * FROM tools ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY LOWER(name)`;
   const { results } = await db.prepare(sql).bind(...params).all<ToolRow>();
   return results.map(mapTool);
 }
@@ -138,9 +138,20 @@ export async function deleteTool(db: Db, id: string): Promise<void> {
   await db.prepare('DELETE FROM tools WHERE id = ?').bind(id).run();
 }
 
+/*
+ * Both of these sort case-insensitively over a DISTINCT set, which Postgres
+ * will not do directly: under SELECT DISTINCT it requires every ORDER BY
+ * expression to appear in the select list, so `ORDER BY LOWER(category)` is an
+ * error there while being perfectly happy in SQLite. Doing the DISTINCT in a
+ * subquery and sorting outside it is valid in both.
+ */
+
 export async function distinctCategories(db: Db): Promise<string[]> {
   const { results } = await db
-    .prepare('SELECT DISTINCT category FROM tools ORDER BY category COLLATE NOCASE')
+    .prepare(
+      `SELECT category FROM (SELECT DISTINCT category FROM tools) t
+       ORDER BY LOWER(category)`,
+    )
     .all<{ category: string }>();
   return results.map((r) => r.category).filter(Boolean);
 }
@@ -148,9 +159,11 @@ export async function distinctCategories(db: Db): Promise<string[]> {
 export async function distinctOwners(db: Db): Promise<Array<{ name: string | null; email: string | null }>> {
   const { results } = await db
     .prepare(
-      `SELECT DISTINCT owner_name AS name, owner_email AS email FROM tools
-       WHERE owner_name IS NOT NULL OR owner_email IS NOT NULL
-       ORDER BY owner_name COLLATE NOCASE`,
+      `SELECT name, email FROM (
+         SELECT DISTINCT owner_name AS name, owner_email AS email FROM tools
+         WHERE owner_name IS NOT NULL OR owner_email IS NOT NULL
+       ) t
+       ORDER BY LOWER(name)`,
     )
     .all<{ name: string | null; email: string | null }>();
   return results;

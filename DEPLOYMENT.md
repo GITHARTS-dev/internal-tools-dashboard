@@ -1,251 +1,315 @@
-# Deployment and delivery runbook
+# Deployment runbook — Azure Static Web Apps + Supabase
 
-Everything that can be built before we have a Teams channel and a Cloudflare
-account is built. This file is the list of what is left, in the order it needs
-doing, with the exact commands.
+Everything that can be built without live credentials is built and tested. This
+file is what remains, in order, with the exact commands.
 
-Nothing here has been run yet. Deployment is deliberately on hold.
+Nothing here has been run. No Azure resource, Supabase project or Teams channel
+exists yet.
+
+```
+GitHub push
+  └─ GitHub Actions
+      ├─ Vite client  →  Azure Static Web Apps        (free)
+      └─ Hono API     →  SWA managed Functions        (free, included)
+                              └─ Supabase Postgres    (free)
+
+Sign-in:   SWA built-in auth, Entra ID — free, no domain required
+Reminders: a scheduled GitHub Actions workflow calls POST /api/reminders/run
+```
 
 ---
 
-## 1. Teams reminders
+## What you actually have to create
 
-The Teams channel is fully coded. It needs one URL and nothing else: no app
-registration, no admin consent, no credentials.
+| Thing | How | Cost |
+|---|---|---|
+| Supabase project | supabase.com → New project | Free tier |
+| Azure Static Web App | Portal → Create → Static Web App → **Free** plan | Free |
+| Entra app registration | Portal → Entra ID → App registrations | Free |
+| Teams webhook | Teams → channel → Workflows | Free |
 
-### Get the webhook URL
+The Functions app, its routes and the HTTPS certificate are all created by the
+deploy. There is nothing to click for those, and **no domain is needed** —
+Entra sign-in attaches to the `*.azurestaticapps.net` hostname.
+
+---
+
+## 1. Supabase
+
+Create the project and keep the database password somewhere safe; it appears in
+both connection strings below.
+
+**Project Settings → Database → Connection string** gives you two URIs. You need
+both, and using the wrong one in the wrong place is the most likely thing to go
+wrong here:
+
+| Which | Port | Used for | Why |
+|---|---|---|---|
+| **Direct** | 5432 | migrations | A migration transaction needs one session held across statements. |
+| **Transaction pooler** | 6543 | the running app | Every Function instance opens its own connection; without the pooler a handful of concurrent requests exhausts Postgres' connection limit. |
+
+Apply the schema from your machine:
+
+```bash
+DATABASE_URL="postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres" \
+  npm run migrate:pg
+```
+
+Add `-- --dry-run` to see what it would apply first. It is idempotent: it
+tracks what has run in a `schema_migrations` table, so running it again after
+adding a migration applies only the new one.
+
+**Do not** load `seed/dev-seed.sql` into this database. Those rows are
+fictional.
+
+### On the free tier pausing
+
+Supabase pauses a free project after a period of inactivity — I believe about a
+week, but check the current terms. The daily reminder run queries the database,
+so it should keep the project awake on its own. Worth knowing about rather than
+discovering when reminders go quiet.
+
+---
+
+## 2. Entra app registration
+
+This is what restricts sign-in to your company. Without it, Static Web Apps'
+pre-configured Entra provider accepts **any** Microsoft account, which is not
+what you want in front of company spend.
+
+Portal → **Microsoft Entra ID → App registrations → New registration**:
+
+- Name: `Tools dashboard`
+- Supported account types: **Accounts in this organizational directory only**
+- Redirect URI: **Web** → `https://<your-site>.azurestaticapps.net/.auth/login/aad/callback`
+
+You will not know the hostname until after the first deploy, so either deploy
+once first, or come back and add the redirect URI afterwards.
+
+Then:
+1. **Certificates & secrets → New client secret.** Copy the *value* immediately;
+   it is never shown again.
+2. Note the **Application (client) ID** and the **Directory (tenant) ID** from
+   the Overview page.
+3. In [staticwebapp.config.json](staticwebapp.config.json), replace
+   `AAD_TENANT_ID_PLACEHOLDER` with the tenant ID. It is in the issuer URL, not
+   a secret, so it belongs in the committed file.
+
+---
+
+## 3. The Static Web App
+
+Portal → **Create a resource → Static Web App**:
+
+- Plan type: **Free**
+- Deployment: **GitHub**, pointing at this repo and the branch you deploy from
+- Build presets: **Custom**, and leave the paths blank — the workflow in this
+  repo builds everything and uploads the result, so Azure's own build step is
+  skipped
+
+Azure will offer to add its own workflow file. This repo already has
+[.github/workflows/azure-deploy.yml](.github/workflows/azure-deploy.yml), which
+runs the tests before deploying. Delete the generated one and keep this.
+
+Copy the **deployment token** (Overview → Manage deployment token).
+
+### Configuration
+
+**Settings → Environment variables**, for the Production environment:
+
+| Name | Value |
+|---|---|
+| `DATABASE_URL` | Supabase **transaction pooler** URI, port **6543** |
+| `AAD_CLIENT_ID` | Application (client) ID |
+| `AAD_CLIENT_SECRET` | The client secret value |
+| `REMINDER_TOKEN` | A long random string you generate |
+| `TEAMS_WEBHOOK_URL` | From step 5 (optional; can also live in Settings) |
+| `APP_ENV` | `production` |
+
+Generate the reminder token with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+`APP_ENV=production` is not decorative: it disables the endpoints that wipe or
+reload demo data.
+
+### GitHub repository secrets
+
+**Repo → Settings → Secrets and variables → Actions:**
+
+| Secret | Value |
+|---|---|
+| `AZURE_STATIC_WEB_APPS_API_TOKEN` | The deployment token |
+| `APP_URL` | `https://<your-site>.azurestaticapps.net` |
+| `REMINDER_TOKEN` | The same string as above |
+
+---
+
+## 4. Deploy
+
+Push to the deployment branch, or run the workflow by hand from the Actions tab.
+It runs `npm test` first, so a broken build does not reach production.
+
+Then check it:
+
+```bash
+curl https://<your-site>.azurestaticapps.net/api/health
+```
+
+Two things are worth verifying deliberately:
+
+1. **Open the site in a private window.** You should be redirected to a
+   Microsoft sign-in. If you get the app instead, auth is not applied — stop and
+   fix it before entering real data.
+2. **Try an account outside your tenant**, if you have one. It should be
+   refused. If it is let in, the app registration is multi-tenant.
+
+Seed the exchange rates once (they are refreshed daily after that):
+
+```bash
+curl -X POST "https://<your-site>.azurestaticapps.net/api/fx/refresh?from=2024-01" \
+     -H "x-reminder-token: <REMINDER_TOKEN>"
+```
+
+---
+
+## 5. Teams reminders
+
+The Teams channel is fully coded. It needs one URL and nothing else — no app
+registration, no admin consent.
 
 1. In Teams, open the channel reminders should go to.
 2. `⋯` beside the channel name → **Workflows**.
-3. Pick the template **"Post to a channel when a webhook request is received"**.
-4. Name it something like `Tools dashboard reminders`, confirm the team and
-   channel, and click through to the end.
-5. Copy the URL it gives you. It looks like
-   `https://prod-XX.westus.logic.azure.com:443/workflows/...`
+3. Template: **"Post to a channel when a webhook request is received"**.
+4. Name it, confirm the team and channel, finish.
+5. Copy the URL.
 
-That URL is a password. Anyone holding it can post into the channel.
+That URL is a password — anyone holding it can post into the channel. Put it in
+the SWA environment variables as `TEAMS_WEBHOOK_URL`, or paste it into the app's
+own Settings page.
 
-### Put it in
+Then press **Send test** beside Teams in Settings. A card should arrive within
+seconds. The test records nothing, so it cannot consume a real reminder's
+dedupe key.
 
-**For local use**, paste it into Settings → Teams webhook URL, then press
-**Send test** next to Teams in "Where reminders go". A card should appear in the
-channel within a second or two. The test records nothing, so it cannot suppress
-a real reminder.
+### What actually gets sent, and when
 
-**For the deployed Worker**, prefer a secret over the settings row:
+The scheduled workflow runs once a day. **That is the check, not the message.**
+It asks "is anything crossing a reminder threshold today?" and posts only when
+the answer is yes:
 
-```bash
-wrangler secret put TEAMS_WEBHOOK_URL --env production
+- A renewal is 60 / 30 / 14 / 7 / 3 / 1 days away (configurable in Settings).
+- A payment is due soon, or is overdue.
+- The last day to cancel without paying for another period is approaching.
+- A tool is missing data, or has seats nobody uses.
+
+On a quiet day it posts nothing at all. The `notification_log` table's unique
+`dedupe_key` is what guarantees the same alert never goes out twice, per
+channel.
+
+To see exactly what would fire on any date without sending anything, use
+Settings → **Preview reminders**, or:
+
+```
+GET /api/reminders/dry-run?date=2026-10-01
 ```
 
-The code checks the settings value first and falls back to the environment
-variable, so either works and the secret keeps the URL out of the database.
+To fire it by hand: Actions tab → **Send due reminders** → Run workflow.
 
-### What gets sent
+### Why the schedule is not in Azure
 
-- **Daily**, at 03:00 UTC (08:30 IST): one card listing everything that newly
-  crossed a reminder threshold. One message per run, not one per alert.
-- **Weekly**, on the digest weekday: everything on the horizon.
-- Nothing is sent twice. The `notification_log` table's unique `dedupe_key` is
-  what guarantees it, per channel.
+Static Web Apps' managed Functions are HTTP-only — they have no timer trigger.
+The options were a separate Function App (another resource to run and watch) or
+a scheduled workflow calling the endpoint. The workflow is free, sits next to
+the code, logs what it sent, and can be run manually in one click.
 
-Preview any day's output without sending, using Settings → Preview reminders,
-or `GET /api/reminders/dry-run?date=2026-10-01`.
+That does mean one endpoint is reachable without an interactive sign-in, which
+is why `/api/reminders/run` carries its own shared secret. It is excluded from
+the Entra rule in `staticwebapp.config.json` and checks `x-reminder-token` with
+a constant-time comparison. Without `REMINDER_TOKEN` set, the guard is inert —
+fine locally, wrong in production. **Set it.**
 
 ---
 
-## 2. Email reminders (optional, still inert)
+## 6. Email (optional, still inert)
 
-The email channel exists and stays skipped until credentials are set. Two
-providers are supported.
+The email channel exists and stays skipped until credentials are set. Add these
+as SWA environment variables:
 
-**Microsoft Graph** — sends from our own M365 domain, no new vendor:
+**Microsoft Graph** — sends from your own M365 domain:
 
-```bash
-wrangler secret put EMAIL_PROVIDER --env production   # value: graph
-wrangler secret put MS_TENANT_ID --env production
-wrangler secret put MS_CLIENT_ID --env production
-wrangler secret put MS_CLIENT_SECRET --env production
+```
+EMAIL_PROVIDER=graph
+MS_TENANT_ID=...
+MS_CLIENT_ID=...
+MS_CLIENT_SECRET=...
 ```
 
-This one does need an app registration with `Mail.Send` application permission
-and admin consent, which is why Teams ships first.
+Needs an app registration with `Mail.Send` application permission and admin
+consent — which is why Teams ships first.
 
-**Resend** — faster to set up, external vendor:
+**Resend** — faster, external vendor:
 
-```bash
-wrangler secret put EMAIL_PROVIDER --env production   # value: resend
-wrangler secret put RESEND_API_KEY --env production
+```
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=...
 ```
 
 Then set "Send email from" and "Send email to" in Settings.
 
 ---
 
-## 3. Cloudflare
+## Local development
 
-### What has to exist
-
-| Thing | How it gets made | Cost |
-|---|---|---|
-| Cloudflare account | Sign up | Free |
-| **D1 database** (`tools_db`) | `wrangler d1 create tools_db` | Free tier: 5GB, ~5M reads/day |
-| **Worker** | Created by `wrangler deploy` — nothing to click | Free tier: 100k requests/day |
-| Cron trigger | Registered by the deploy, from `wrangler.jsonc` | Free |
-| Static assets (the React app) | Uploaded by the same deploy | Free |
-| **A domain** | Add an existing one, or buy one | ~£10/year |
-| Cloudflare Access application | Zero Trust dashboard | Free for small teams |
-
-Only two of those are things you create by hand before deploying: the **D1
-database** and the **domain**. The Worker, its cron and its assets are all
-products of `wrangler deploy`.
-
-The domain is needed only for sign-in — see [Sign-in](#sign-in). You can deploy
-and test on `*.workers.dev` first, as long as there is no real data in it.
-
-This app's usage is a handful of people and one cron run a day, so the free
-tiers are not close to being a constraint.
-
-### One-time setup
+Unchanged by any of this, and still needs no cloud account:
 
 ```bash
-npx wrangler login
-
-# Create the production database. This prints a database_id.
-npx wrangler d1 create tools_db
+npm install
+npm run db:reset    # rebuild .data/dev.sqlite and load the demo data
+npm run dev         # API on :8787, client on :5173
 ```
 
-Paste that id into `wrangler.jsonc`, into the **`env.production`** block's
-`database_id` field, replacing `REPLACE_WITH_REAL_D1_ID`. Leave the top-level
-placeholder alone: keeping them separate is what stops local development
-writing to the live database.
+Local runs on SQLite so it stays instant and offline. The fidelity that costs is
+bought back in `tests/postgres.test.ts`, which runs the whole API against real
+Postgres — PGlite, Postgres compiled to WASM — on every `npm test`. That is what
+catches dialect differences before they reach Supabase.
 
-Apply the schema to the remote database:
-
-```bash
-npx wrangler d1 migrations apply tools_db --remote --env production
-```
-
-Do **not** run `seed:local` against production. It loads the fictional demo
-data.
-
-### Deploy
+To point local development at a real Postgres instead:
 
 ```bash
-npm run build          # typecheck + build the client into dist/client
-npx wrangler deploy --env production
-```
-
-Check it before trusting it:
-
-```bash
-curl https://<your-worker>.workers.dev/api/health
-```
-
-The cron trigger is registered by the deploy. To prove the scheduled job works
-without waiting for 03:00 UTC, use the Cloudflare dashboard's "Trigger
-scheduled event", or locally:
-
-```bash
-curl "http://127.0.0.1:8787/cdn-cgi/local/scheduled"
-```
-
-### Sign-in
-
-There is no authentication in the app. Until there is, Cloudflare Access goes in
-front of the whole Worker.
-
-**This is the step that needs a domain.** An Access self-hosted application is
-defined by a hostname in a zone *you* own on Cloudflare. `*.workers.dev` is
-Cloudflare's own zone, not yours, so a policy cannot be attached to it. In
-practice that means:
-
-1. Add a domain to Cloudflare (an existing one, or buy one — a `.com` is roughly
-   £10/year, and this is the only unavoidable cost in the whole setup).
-2. Point the Worker at a hostname on it, e.g. `tools.ourdomain.com`, via
-   Workers → the Worker → Settings → Domains & Routes → Add custom domain.
-3. Zero Trust → Access → Applications → Add → Self-hosted, using that hostname.
-4. Identity provider: Azure AD / Entra ID, so people sign in with the M365
-   account they already have.
-5. Policy: allow the specific emails, or the Entra group, that should get in.
-
-Confirm the workers.dev limitation against current Cloudflare docs before buying
-anything — it is the kind of thing they change.
-
-Access is free for small teams. **Until that policy exists, do not deploy with
-real data**: a bare `workers.dev` URL is public to anyone who has it, and this
-app has no login of its own.
-
-### Rollback
-
-```bash
-npx wrangler deployments list
-npx wrangler rollback <deployment-id>
-```
-
-D1 has its own time-travel restore, separate from Worker rollback:
-
-```bash
-npx wrangler d1 time-travel restore tools_db --timestamp <iso-8601> --env production
+DATABASE_URL="postgresql://..." npm run dev:api
 ```
 
 ---
 
-## 4. Exchange rates in production
+## Rollback
 
-Rates come from the ECB's public API. No key, no account, no cost.
+Static Web Apps keeps previous deployments; the reliable rollback is to revert
+the commit and let the workflow redeploy.
 
-After the first deploy, seed a couple of years of history once:
-
-```bash
-curl -X POST "https://<your-worker>.workers.dev/api/fx/refresh?from=2024-01"
-```
-
-After that the daily job keeps them current on its own, as long as Settings →
-"Fetch exchange rates automatically" is on. It refreshes a trailing three-month
-window, because the ECB revises recent months and publishes a month only once
-that month has ended.
-
-If the ECB is unreachable, the reminder run still happens — rates are refreshed
-first and a failure there is logged and stepped over.
-
----
-
-## 5. If we go with Supabase + Azure instead
-
-The alternative discussed. What it would cost us, honestly:
-
-- The API is a Cloudflare Worker over D1 (SQLite). Moving means porting the
-  schema and queries to Postgres and rewriting the API host.
-- `src/server/repo/db.ts` is the only place that touches the database, and it is
-  a deliberately narrow interface. That is the seam a port would go through, so
-  the work is one adapter rather than an application rewrite — but the SQL
-  dialect differences are still real.
-- Static Web Apps' managed functions are HTTP-only, so the daily job needs a
-  separate Function App with a timer trigger. On Cloudflare the cron is one line
-  of config.
-- Check Supabase's current free-tier terms before committing: projects pausing
-  after a period of inactivity would silently stop reminders, which is the one
-  failure this product cannot have.
-- Entra sign-in is more natural on Azure. Cloudflare Access does M365 sign-in
-  too, and is free for small teams, so this is a smaller advantage than it looks.
-
-Recommendation: stay on Cloudflare unless something else forces the move.
+The database is separate. Supabase free tier has daily backups with limited
+retention — check what yours actually has **before** you need it. Nothing in
+this app hard-deletes: cancelled tools are archived and keep their payment
+history, so the common "undo" is a status change, not a restore.
 
 ---
 
 ## Checklist
 
-- [ ] Teams workflow created, URL copied
-- [ ] URL pasted into Settings (local) — **Send test** produces a card
-- [ ] Cloudflare account created
-- [ ] `wrangler login`
-- [ ] `wrangler d1 create tools_db`, id pasted into `env.production`
-- [ ] `wrangler d1 migrations apply tools_db --remote --env production`
-- [ ] `wrangler secret put TEAMS_WEBHOOK_URL --env production`
-- [ ] Domain added to Cloudflare, custom hostname pointed at the Worker
-- [ ] Cloudflare Access policy in place, tested with a second account
-- [ ] `npm run build && wrangler deploy --env production`
-- [ ] `/api/health` responds
+- [ ] Supabase project created, password saved
+- [ ] `npm run migrate:pg` against the **direct** URI (5432) succeeds
+- [ ] Entra app registration, single-tenant, secret copied
+- [ ] Tenant ID pasted into `staticwebapp.config.json`
+- [ ] Static Web App created on the **Free** plan, deployment token copied
+- [ ] Azure-generated workflow deleted, this repo's kept
+- [ ] SWA environment variables set (`DATABASE_URL` on the **pooler**, 6543)
+- [ ] GitHub secrets set (`AZURE_STATIC_WEB_APPS_API_TOKEN`, `APP_URL`, `REMINDER_TOKEN`)
+- [ ] Deploy green, `/api/health` responds
+- [ ] Redirect URI added to the app registration
+- [ ] **Private window redirects to sign-in** — not straight into the app
+- [ ] An account outside the tenant is refused
 - [ ] `POST /api/fx/refresh?from=2024-01` run once
-- [ ] Scheduled event triggered manually, card arrives in Teams
+- [ ] Teams webhook set, **Send test** produces a card
+- [ ] "Send due reminders" workflow run manually, card arrives

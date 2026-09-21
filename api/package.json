@@ -1,0 +1,11 @@
+{
+  "name": "internal-tools-dashboard-api",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@azure/functions": "^4.16.5",
+    "pg": "^8.23.0"
+  }
+}

@@ -10,6 +10,7 @@ import { listNotifications } from '../repo/notifications';
 import { listRecentAudit } from '../repo/audit';
 import { recordAudit } from '../repo/audit';
 import { runReminders } from '../reminders';
+import { refreshRatesIfDue } from '../fx/refresh';
 import { DEFAULT_CHANNELS } from '../reminders';
 
 export const adminRoutes = new Hono<{ Bindings: Env }>();
@@ -70,8 +71,71 @@ adminRoutes.get('/reminders/dry-run', async (c) => {
   return c.json(run);
 });
 
-/** Run the reminder job for real, now. Used to test a freshly pasted webhook. */
+/**
+ * Compare two secrets without leaking their contents through timing.
+ *
+ * A plain `===` on a secret returns as soon as it finds a differing byte, so
+ * the time it takes reveals how much of the prefix was right. That is enough
+ * to recover a token one character at a time given enough attempts.
+ */
+function secretsMatch(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+/**
+ * The reminder job is the one endpoint a machine calls.
+ *
+ * Everything else sits behind the host's sign-in (Static Web Apps + Entra), but
+ * the scheduler has no interactive session, so this route is excluded from that
+ * rule and carries its own shared secret instead. Without the guard the route
+ * would be the one unauthenticated hole in the app.
+ *
+ * When REMINDER_TOKEN is unset -- local development -- the guard is inert, so
+ * `npm run dev` needs no ceremony. It is required in production; see
+ * DEPLOYMENT.md.
+ */
+adminRoutes.use('/reminders/run', async (c, next) => {
+  const expected = envVars(c)['REMINDER_TOKEN'];
+  if (!expected) return next();
+
+  const provided = c.req.header('x-reminder-token') ?? '';
+  if (!secretsMatch(provided, expected)) {
+    return c.json(
+      { error: 'unauthorized', message: 'A valid x-reminder-token header is required.' },
+      401,
+    );
+  }
+  return next();
+});
+
+/**
+ * Run the daily job for real, now.
+ *
+ * This is what the scheduler calls, and what "Send reminders now" in Settings
+ * calls. It is the whole daily job, not just the messaging half: rates are
+ * refreshed first so a card quoting a converted total uses the same numbers
+ * the dashboard will show that morning.
+ *
+ * A rate failure is logged into the response and stepped over. The ECB being
+ * unreachable must never stop a renewal reminder going out -- that would trade
+ * a cosmetic problem for the one failure this product cannot have.
+ */
 adminRoutes.post('/reminders/run', async (c) => {
+  let fx: { refreshed: boolean; saved: number; error?: string };
+  try {
+    const result = await refreshRatesIfDue(db(c));
+    fx = { refreshed: result.refreshed, saved: result.saved };
+  } catch (error) {
+    fx = {
+      refreshed: false,
+      saved: 0,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+
   const run = await runReminders(db(c), envVars(c), { dryRun: false });
   await recordAudit(db(c), {
     entity: 'reminders',
@@ -80,7 +144,7 @@ adminRoutes.post('/reminders/run', async (c) => {
     actor: actor(c),
     summary: `Ran reminders for ${run.today}`,
   });
-  return c.json(run);
+  return c.json({ ...run, fx });
 });
 
 /**

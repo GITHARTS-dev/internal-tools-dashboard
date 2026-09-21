@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { sqliteDb } from '../src/server/repo/sqlite';
 import type { Db } from '../src/server/repo/db';
 
-const MIGRATIONS_DIR = new URL('../migrations/', import.meta.url);
+export const MIGRATIONS_DIR = new URL('../migrations/', import.meta.url);
 
 /**
  * A fresh in-memory database with every real migration applied, in order.
@@ -41,12 +41,16 @@ export async function api(
   method: string,
   path: string,
   body?: unknown,
+  headers?: Record<string, string>,
 ): Promise<{ status: number; json: any; text: string }> {
   const { app } = await import('../src/server/index');
   const init: RequestInit = { method };
   if (body !== undefined) {
     init.body = typeof body === 'string' ? body : JSON.stringify(body);
     init.headers = { 'content-type': typeof body === 'string' ? 'text/csv' : 'application/json' };
+  }
+  if (headers) {
+    init.headers = { ...(init.headers as Record<string, string>), ...headers };
   }
   const response = await app.fetch(new Request(`${BASE}${path}`, init), env as never);
   const text = await response.text();

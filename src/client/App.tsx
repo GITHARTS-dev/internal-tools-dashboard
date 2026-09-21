@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { ToastProvider } from './components/ui';
+import { formatDate } from '../shared/dates';
 import { api } from './lib/api';
 import Dashboard from './pages/Dashboard';
 import Tools from './pages/Tools';
@@ -65,6 +66,7 @@ export default function App() {
   const { theme, apply } = useTheme();
   const location = useLocation();
   const [attention, setAttention] = useState<number>(0);
+  const [asAt, setAsAt] = useState<string>('');
 
   // The sidebar badge is the one number people look at without clicking in,
   // so it refreshes on every navigation rather than only on first load.
@@ -75,10 +77,14 @@ export default function App() {
       .then((data) => {
         if (!cancelled) {
           setAttention(data.alerts.filter((a) => a.severity === 'critical').length);
+          setAsAt(data.today);
         }
       })
       .catch(() => {
-        if (!cancelled) setAttention(0);
+        if (!cancelled) {
+          setAttention(0);
+          setAsAt('');
+        }
       });
     return () => {
       cancelled = true;
@@ -178,13 +184,14 @@ export default function App() {
               <h1>{title}</h1>
               {subtitle ? <div className="subtitle">{subtitle}</div> : null}
             </div>
-            {api.isDemo ? (
-              <div className="topbar-meta">
+            <div className="topbar-meta">
+              {api.isDemo ? (
                 <span className="badge warning" title="Edits are kept in memory only">
                   Demo · edits reset on reload
                 </span>
-              </div>
-            ) : null}
+              ) : null}
+              {asAt ? <span className="as-at">As at {formatDate(asAt)}</span> : null}
+            </div>
           </header>
 
           <main className="content">

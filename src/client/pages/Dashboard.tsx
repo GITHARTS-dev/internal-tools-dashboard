@@ -93,9 +93,8 @@ export default function Dashboard() {
       <section className="card">
         <div className="card-head">
           <h2>Needs attention</h2>
-          <span className="hint">
-            as of {formatDate(data.today)} · {data.timezone}
-          </span>
+          {/* The date lives in the statement header; this says the window. */}
+          <span className="hint">{data.timezone}</span>
         </div>
         <AlertList
           alerts={visibleAlerts}

@@ -38,6 +38,29 @@ export interface Tool {
   notes: string | null;
   started_on: IsoDate | null;
   cancelled_on: IsoDate | null;
+  /** Set when this cost is part of running one of our own products. */
+  internal_product_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type InternalProductStatus = 'live' | 'building' | 'retired';
+
+/**
+ * One of the company's own products. Its running cost is not stored here:
+ * it is the roll-up of the tools attributed to it, so there is exactly one
+ * ledger and one definition of what a cost is.
+ */
+export interface InternalProduct {
+  id: string;
+  name: string;
+  description: string | null;
+  status: InternalProductStatus;
+  owner_name: string | null;
+  owner_email: string | null;
+  launched_on: IsoDate | null;
+  retired_on: IsoDate | null;
+  notes: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -109,6 +132,10 @@ export interface AppSettings {
   teams_webhook_url: string;
   email_from: string;
   email_to: string;
+  /** Currency any combined total is expressed in. */
+  reporting_currency: string;
+  /** Whether the daily job may fetch fresh ECB rates on its own. */
+  fx_auto_refresh: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -123,6 +150,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   teams_webhook_url: '',
   email_from: '',
   email_to: '',
+  reporting_currency: 'INR',
+  fx_auto_refresh: true,
 };
 
 // ---------------------------------------------------------------------------
@@ -204,6 +233,102 @@ export interface DashboardData {
   alerts: Alert[];
   category_spend: CategorySpend[];
   renewal_timeline: RenewalTimelineEntry[];
+}
+
+// ---------------------------------------------------------------------------
+// The CEO view: one currency, stated assumptions
+// ---------------------------------------------------------------------------
+
+/** Running cost of one of our own products, rolled up from its tools. */
+export interface InternalProductCost {
+  product: InternalProduct;
+  tool_count: number;
+  /** Per-currency, before any conversion. */
+  monthly: Record<string, number>;
+  annual: Record<string, number>;
+  /** Converted into the reporting currency; null when rates were missing. */
+  monthly_reported: number | null;
+  annual_reported: number | null;
+}
+
+/** A ranked line in one of the concentration charts. */
+export interface RankedSpend {
+  id: string;
+  label: string;
+  sublabel: string | null;
+  /** Annualised, converted into the reporting currency. */
+  annual_reported: number;
+  /** The untouched figure, so the original currency stays visible. */
+  amount: number | null;
+  currency: string;
+}
+
+/**
+ * Spend over the last two complete years, for the trend.
+ *
+ * The current month is deliberately excluded: it is always partial, and a
+ * half-finished month plotted beside complete ones reads as a collapse in
+ * spending that has not happened.
+ */
+export interface PeriodComparison {
+  /** The 12 complete months ending last month. */
+  trailing_12: number | null;
+  /** The 12 complete months before those. */
+  previous_12: number | null;
+  /** Percentage change between them; null when there is no base to compare. */
+  change_pct: number | null;
+  /** First and last month of the trailing window, for labelling. */
+  from: string | null;
+  to: string | null;
+}
+
+/**
+ * Everything the CEO summary shows, with the conversion made explicit.
+ *
+ * `gaps` is not an error channel. It is the list of amounts that could not be
+ * converted and are therefore absent from the totals, shown on screen so the
+ * headline number is never quietly wrong.
+ */
+export interface CeoSummary {
+  today: IsoDate;
+  reporting_currency: string;
+  /** Bought SaaS: tools not attributed to one of our own products. */
+  subscriptions: {
+    tool_count: number;
+    monthly_reported: number | null;
+    annual_reported: number | null;
+  };
+  /** Our own products' running cost. */
+  internal: {
+    product_count: number;
+    tool_count: number;
+    monthly_reported: number | null;
+    annual_reported: number | null;
+  };
+  products: InternalProductCost[];
+  total_monthly_reported: number | null;
+  total_annual_reported: number | null;
+  /** Actually-paid spend by year, from the ledger, at each month's own rate. */
+  paid_by_year: Array<{ year: string; amount: number }>;
+  /** Actually-paid spend per month, converted, for the trend. */
+  paid_by_month: Array<{ month: string; amount: number }>;
+  /** Is spending rising or falling, on complete months only. */
+  comparison: PeriodComparison;
+  /** The costliest subscriptions, biggest first. */
+  top_tools: RankedSpend[];
+  /** Annual spend per category, biggest first. */
+  by_category: RankedSpend[];
+  /**
+   * Annual value of seats paid for but not used, converted. The one number on
+   * this page that names money already being wasted.
+   */
+  idle_seat_cost: number | null;
+  idle_seat_count: number;
+  /** Amounts left out of the totals because no rate covered them. */
+  gaps: Array<{ currency: string; month: string | null; count: number }>;
+  /** Months whose ECB rates the totals used. */
+  rate_months: string[];
+  fx_available: boolean;
 }
 
 /** How much is stored, and how much of it is the built-in demo data. */

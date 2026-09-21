@@ -9,6 +9,18 @@ import ToolForm from './pages/ToolForm';
 import Payments from './pages/Payments';
 import History from './pages/History';
 import Settings from './pages/Settings';
+import CostSummary from './pages/CostSummary';
+import Products from './pages/Products';
+import ProductDetail from './pages/ProductDetail';
+import {
+  IconDashboard,
+  IconHistory,
+  IconPayments,
+  IconProducts,
+  IconSettings,
+  IconSummary,
+  IconTools,
+} from './components/icons';
 
 function useTheme() {
   const [theme, setTheme] = useState<'system' | 'light' | 'dark'>(() => {
@@ -40,10 +52,13 @@ function useTheme() {
 
 const TITLES: Array<[RegExp, string, string]> = [
   [/^\/$/, 'Dashboard', 'What needs attention right now'],
+  [/^\/summary$/, 'Cost summary', 'Everything we spend, in one currency'],
   [/^\/tools\/new$/, 'Add a tool', 'Record a new subscription'],
   [/^\/tools\/[^/]+\/edit$/, 'Edit tool', 'Update this subscription'],
   [/^\/tools\/[^/]+$/, 'Tool', 'Subscription detail'],
   [/^\/tools$/, 'Tools', 'Everything we currently pay for'],
+  [/^\/products\/[^/]+$/, 'Product', 'What it costs to run'],
+  [/^\/products$/, 'Our products', 'What our own software costs to run'],
   [/^\/payments$/, 'Payments', 'The ledger of what is due and what was paid'],
   [/^\/history$/, 'History', 'Tools we no longer pay for'],
   [/^\/settings$/, 'Settings', 'Reminders, delivery and preferences'],
@@ -84,19 +99,29 @@ export default function App() {
       <div className="app">
         <aside className="sidebar">
           <div className="brand">
-            <span className="brand-mark" aria-hidden="true">
-              TS
-            </span>
-            <span>
-              <div className="brand-text">Tools &amp; Subs</div>
-              <div className="brand-sub">Internal ledger</div>
-            </span>
+            {/* Both marks ship; CSS shows the one that suits the surface. */}
+            <img
+              className="brand-logo on-light"
+              src="/harts-logo-on-light.png"
+              alt="HARTS"
+              width={109}
+              height={26}
+            />
+            <img
+              className="brand-logo on-dark"
+              src="/harts-logo-on-dark.png"
+              alt="HARTS"
+              width={109}
+              height={26}
+            />
+            <div className="brand-sub">Tools &amp; subscriptions</div>
           </div>
 
           <nav className="nav" aria-label="Main">
             <div>
               <div className="nav-section">Overview</div>
               <NavLink to="/" end className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+                <IconDashboard />
                 Dashboard
                 {attention > 0 ? (
                   <span className="count" title={`${attention} urgent`}>
@@ -104,22 +129,34 @@ export default function App() {
                   </span>
                 ) : null}
               </NavLink>
+              <NavLink to="/summary" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+                <IconSummary />
+                Cost summary
+              </NavLink>
             </div>
             <div>
               <div className="nav-section">Records</div>
               <NavLink to="/tools" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+                <IconTools />
                 Tools
               </NavLink>
+              <NavLink to="/products" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+                <IconProducts />
+                Our products
+              </NavLink>
               <NavLink to="/payments" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+                <IconPayments />
                 Payments
               </NavLink>
               <NavLink to="/history" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+                <IconHistory />
                 History
               </NavLink>
             </div>
             <div>
               <div className="nav-section">Admin</div>
               <NavLink to="/settings" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+                <IconSettings />
                 Settings
               </NavLink>
             </div>
@@ -160,6 +197,9 @@ export default function App() {
           <main className="content">
             <Routes>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/summary" element={<CostSummary />} />
+              <Route path="/products" element={<Products />} />
+              <Route path="/products/:id" element={<ProductDetail />} />
               <Route path="/tools" element={<Tools />} />
               <Route path="/tools/new" element={<ToolForm />} />
               <Route path="/tools/:id" element={<ToolDetail />} />

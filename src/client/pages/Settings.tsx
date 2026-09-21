@@ -3,6 +3,7 @@ import { api, ApiError, type ImportResult, type ReminderRunResponse } from '../l
 import { useAsync } from '../lib/hooks';
 import { Badge, Banner, EmptyState, Loading, useToast } from '../components/ui';
 import { AlertRow } from '../components/ui';
+import { IconRefresh, IconSend } from '../components/icons';
 import { formatDate } from '../../shared/dates';
 
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -38,6 +39,8 @@ export default function Settings() {
       teams_webhook_url: s.teams_webhook_url,
       email_from: s.email_from,
       email_to: s.email_to,
+      reporting_currency: s.reporting_currency,
+      fx_auto_refresh: String(s.fx_auto_refresh),
     });
   }, [data]);
 
@@ -70,6 +73,8 @@ export default function Settings() {
         teams_webhook_url: form['teams_webhook_url'] ?? '',
         email_from: form['email_from'] ?? '',
         email_to: form['email_to'] ?? '',
+        reporting_currency: (form['reporting_currency'] ?? 'INR').toUpperCase(),
+        fx_auto_refresh: form['fx_auto_refresh'] ?? 'true',
       });
       toast('Settings saved.');
       reload();
@@ -96,7 +101,7 @@ export default function Settings() {
           A channel only sends when it has what it needs. Nothing here is guesswork — this is the
           live state the reminder job will see.
         </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {data.channels.map((channel) => (
             <div key={channel.name} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
               <div style={{ minWidth: 92 }}>
@@ -104,16 +109,22 @@ export default function Settings() {
                   {channel.configured ? 'Ready' : 'Not set up'}
                 </Badge>
               </div>
-              <div>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, textTransform: 'capitalize' }}>{channel.name}</div>
                 <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
                   {CHANNEL_HELP[channel.name]}
                 </div>
               </div>
+              {/* Console needs no proving; the other two do. */}
+              {channel.name !== 'console' ? (
+                <TestChannelButton name={channel.name} enabled={channel.configured} />
+              ) : null}
             </div>
           ))}
         </div>
       </section>
+
+      <FxPanel />
 
       <form onSubmit={save}>
         <section className="card">
@@ -185,6 +196,38 @@ export default function Settings() {
               />
             </div>
 
+            <div className="fieldset-title">Reporting</div>
+
+            <div className="field">
+              <label htmlFor="reporting_currency">Report combined totals in</label>
+              <input
+                id="reporting_currency"
+                value={form['reporting_currency'] ?? ''}
+                maxLength={3}
+                style={{ textTransform: 'uppercase' }}
+                onChange={(e) => set('reporting_currency', e.target.value)}
+              />
+              <span className="help">
+                The currency the cost summary is expressed in. Amounts in other currencies are
+                converted at ECB rates and always labelled as converted.
+              </span>
+            </div>
+
+            <div className="field">
+              <label htmlFor="fx_auto_refresh">Fetch exchange rates automatically</label>
+              <select
+                id="fx_auto_refresh"
+                value={form['fx_auto_refresh'] ?? 'true'}
+                onChange={(e) => set('fx_auto_refresh', e.target.value)}
+              >
+                <option value="true">Yes, with the daily job</option>
+                <option value="false">No, I will fetch them by hand</option>
+              </select>
+              <span className="help">
+                The daily job asks the ECB for any newly published month before sending reminders.
+              </span>
+            </div>
+
             <div className="fieldset-title">Delivery</div>
 
             <div className="field wide">
@@ -253,6 +296,158 @@ export default function Settings() {
       <DryRunPanel />
       <ImportPanel onDone={reload} />
     </>
+  );
+}
+
+/**
+ * Send one real message down a channel.
+ *
+ * Pasting a webhook URL is the step most likely to be wrong, and without this
+ * the only way to find out is to wait for tomorrow's cron. The test records
+ * nothing, so it cannot consume a real reminder's dedupe key.
+ */
+function TestChannelButton({ name, enabled }: { name: string; enabled: boolean }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+
+  async function send() {
+    setBusy(true);
+    try {
+      const { result } = await api.testChannel(name);
+      if (result.status === 'sent') toast(`Test message sent to ${name}. Go and look.`);
+      else toast(`${name}: ${result.detail}`, 'error');
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : `Could not reach ${name}.`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className="btn sm"
+      onClick={send}
+      disabled={!enabled || busy}
+      title={enabled ? `Send a test message to ${name}` : `Set ${name} up first`}
+    >
+      <IconSend size={13} />
+      {busy ? 'Sending…' : 'Send test'}
+    </button>
+  );
+}
+
+/**
+ * Exchange rates.
+ *
+ * Shows what is stored rather than only offering a button, because the useful
+ * question here is "can the cost summary actually add these currencies up",
+ * and the honest answer is the range of months on hand.
+ */
+function FxPanel() {
+  const toast = useToast();
+  const { data, error, reload } = useAsync(() => api.fxStatus(), []);
+  const [busy, setBusy] = useState(false);
+  const [from, setFrom] = useState('');
+
+  async function refresh() {
+    setBusy(true);
+    try {
+      const result = await api.refreshFx(from || undefined);
+      toast(
+        result.missing.length > 0
+          ? `Saved ${result.saved} rates. The ECB publishes none for: ${result.missing.join(', ')}.`
+          : `Saved ${result.saved} rates, ${result.from} to ${result.to}.`,
+      );
+      reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not reach the ECB.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (error) return <Banner tone="critical">{error}</Banner>;
+  if (!data) return null;
+
+  const { status } = data;
+  const uncovered = data.currencies_in_use.filter(
+    (c) => c !== 'EUR' && c !== data.reporting_currency && !status.currencies.includes(c),
+  );
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Exchange rates</h2>
+        <span className="hint">European Central Bank</span>
+      </div>
+      <p className="card-sub">
+        Only needed to add different currencies together. Each amount is converted at the rate of
+        the month it belongs to, so a past year's total never changes.
+      </p>
+
+      {status.months === 0 ? (
+        <Banner tone="warning">
+          No rates stored yet. Until you fetch some, the cost summary can only count amounts already
+          in {data.reporting_currency}.
+        </Banner>
+      ) : (
+        <dl className="detail-grid" style={{ marginBottom: 16 }}>
+          <div className="detail-item">
+            <dt>Months stored</dt>
+            <dd>
+              {status.months} ({status.earliest} to {status.latest})
+            </dd>
+          </div>
+          <div className="detail-item">
+            <dt>Currencies</dt>
+            <dd>{status.currencies.join(', ') || '--'}</dd>
+          </div>
+          <div className="detail-item">
+            <dt>Last fetched</dt>
+            <dd>
+              {status.last_fetched_at
+                ? new Date(status.last_fetched_at).toLocaleString()
+                : 'Never'}
+            </dd>
+          </div>
+          <div className="detail-item">
+            <dt>Reporting in</dt>
+            <dd>{data.reporting_currency}</dd>
+          </div>
+        </dl>
+      )}
+
+      {uncovered.length > 0 ? (
+        <Banner tone="warning">
+          In use but with no stored rate: {uncovered.join(', ')}. Amounts in{' '}
+          {uncovered.length === 1 ? 'that currency' : 'those currencies'} are left out of combined
+          totals until a rate exists.
+        </Banner>
+      ) : null}
+
+      <div className="toolbar" style={{ marginTop: 14 }}>
+        <div className="field" style={{ maxWidth: 180 }}>
+          <label htmlFor="fx-from">Fetch from month</label>
+          <input
+            id="fx-from"
+            value={from}
+            placeholder="2024-01"
+            onChange={(e) => setFrom(e.target.value)}
+          />
+          <span className="help">Blank fetches the last 24 months.</span>
+        </div>
+        <button type="button" className="btn primary" onClick={refresh} disabled={busy}>
+          <IconRefresh size={14} />
+          {busy ? 'Fetching…' : 'Fetch rates now'}
+        </button>
+      </div>
+
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>
+        The ECB publishes a month's average only once that month has ended, so the current month is
+        always absent. Totals covering it fall back to the most recent month available.
+      </p>
+    </section>
   );
 }
 

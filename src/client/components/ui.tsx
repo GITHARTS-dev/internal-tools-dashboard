@@ -1,18 +1,22 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import { formatDate, relativeDays } from '../../shared/dates';
 import { formatMoney } from '../../shared/money';
+import { IconCritical, IconInfo, IconWarning } from './icons';
 import type { Alert, Severity, ToolStatus } from '../../shared/types';
 
 /**
  * Status is never carried by colour alone: every badge and alert pairs its
- * colour with an icon glyph and a text label, which is what keeps them
+ * colour with a distinct icon shape and a text label, which is what keeps them
  * readable for colourblind viewers, in print, and under forced-colors.
+ *
+ * The three shapes differ in silhouette (circle, triangle, circle with a
+ * different interior), not just in colour, so severity survives greyscale.
  */
 
-const SEVERITY_GLYPH: Record<Severity, string> = {
-  critical: '!',
-  warning: '▲',
-  info: 'i',
+const SEVERITY_ICON: Record<Severity, typeof IconInfo> = {
+  critical: IconCritical,
+  warning: IconWarning,
+  info: IconInfo,
 };
 
 export function Badge({
@@ -78,14 +82,15 @@ export function StatTile({
 }
 
 export function AlertRow({ alert, onOpen }: { alert: Alert; onOpen?: (toolId: string) => void }) {
+  const SeverityIcon = SEVERITY_ICON[alert.severity];
   return (
     <div
       className="alert-row"
       onClick={onOpen ? () => onOpen(alert.tool_id) : undefined}
       style={onOpen ? { cursor: 'pointer' } : undefined}
     >
-      <span className={`alert-icon ${alert.severity}`} aria-hidden="true">
-        {SEVERITY_GLYPH[alert.severity]}
+      <span className={`alert-icon ${alert.severity}`}>
+        <SeverityIcon size={14} />
       </span>
       <div className="alert-body">
         <div className="alert-title">{alert.title}</div>
@@ -122,9 +127,18 @@ export function AlertList({ alerts, onOpen }: { alerts: Alert[]; onOpen?: (toolI
   );
 }
 
-export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
+export function EmptyState({
+  title,
+  children,
+  compact = false,
+}: {
+  title: string;
+  children?: ReactNode;
+  /** For an empty panel sitting among full ones, where it is an aside. */
+  compact?: boolean;
+}) {
   return (
-    <div className="empty">
+    <div className={`empty${compact ? ' compact' : ''}`}>
       <span className="empty-title">{title}</span>
       {children ? <span>{children}</span> : null}
     </div>

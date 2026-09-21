@@ -4,7 +4,9 @@ import type {
   AppSettings,
   AuditEntry,
   CategorySpend,
+  CeoSummary,
   DataStatus,
+  InternalProduct,
   KpiSummary,
   NotificationEntry,
   Payment,
@@ -12,6 +14,7 @@ import type {
   Tool,
   ToolDocument,
 } from '../../shared/types';
+import type { FxRate } from '../../shared/fx';
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -91,6 +94,30 @@ export interface ReminderRunResponse {
   };
   digest_dispatch: ReminderRunResponse['alert_dispatch'] | null;
 }
+
+export interface FxStatusResponse {
+  status: {
+    months: number;
+    currencies: string[];
+    earliest: string | null;
+    latest: string | null;
+    last_fetched_at: string | null;
+  };
+  reporting_currency: string;
+  auto_refresh: boolean;
+  currencies_in_use: string[];
+}
+
+export interface FxRefreshResponse {
+  saved: number;
+  from: string;
+  to: string;
+  currencies: string[];
+  missing: string[];
+  status: FxStatusResponse['status'];
+}
+
+export type InternalProductWithCount = InternalProduct & { tool_count: number };
 
 export const api = {
   isDemo: false,
@@ -187,6 +214,53 @@ export const api = {
   loadDemoData: () => request<{ status: DataStatus }>('/data/demo', { method: 'POST' }),
   removeDemoData: () => request<{ status: DataStatus }>('/data/demo', { method: 'DELETE' }),
   clearAllData: () => request<{ status: DataStatus }>('/data?confirm=true', { method: 'DELETE' }),
+
+  testChannel: (name: string) =>
+    request<{ result: { channel: string; status: string; detail: string } }>(
+      `/channels/${name}/test`,
+      { method: 'POST' },
+    ),
+
+  // ------------------------------------------------------------------ FX
+  fxStatus: () => request<FxStatusResponse>('/fx/status'),
+  fxRates: (from?: string, to?: string) => {
+    const query = new URLSearchParams();
+    if (from) query.set('from', from);
+    if (to) query.set('to', to);
+    const qs = query.toString();
+    return request<{ rates: FxRate[] }>(`/fx/rates${qs ? `?${qs}` : ''}`);
+  },
+  refreshFx: (from?: string, to?: string) => {
+    const query = new URLSearchParams();
+    if (from) query.set('from', from);
+    if (to) query.set('to', to);
+    const qs = query.toString();
+    return request<FxRefreshResponse>(`/fx/refresh${qs ? `?${qs}` : ''}`, { method: 'POST' });
+  },
+  setFxRate: (month: string, currency: string, rate: string) =>
+    request<{ month: string; currency: string; rate: string }>(
+      `/fx/rates/${month}/${currency}`,
+      { method: 'PUT', ...json({ rate }) },
+    ),
+
+  // --------------------------------------------------- internal products
+  internalProducts: () =>
+    request<{ products: InternalProductWithCount[] }>('/internal-products'),
+  internalProduct: (id: string) =>
+    request<{ product: InternalProduct; tools: Tool[] }>(`/internal-products/${id}`),
+  createInternalProduct: (body: unknown) =>
+    request<{ product: InternalProduct }>('/internal-products', { method: 'POST', ...json(body) }),
+  updateInternalProduct: (id: string, body: unknown) =>
+    request<{ product: InternalProduct }>(`/internal-products/${id}`, {
+      method: 'PATCH',
+      ...json(body),
+    }),
+  deleteInternalProduct: (id: string) =>
+    request<{ deleted: true; tools_released: number }>(`/internal-products/${id}`, {
+      method: 'DELETE',
+    }),
+
+  ceoSummary: () => request<CeoSummary>('/ceo-summary'),
 
   importCsv: (csv: string, commit: boolean) =>
     request<ImportResult>(`/import${commit ? '?commit=true' : ''}`, {

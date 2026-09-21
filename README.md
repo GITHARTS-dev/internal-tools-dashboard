@@ -13,6 +13,8 @@ It answers three questions that currently have no home:
 3. **What is about to bite us?** A daily job that pushes alerts before a
    renewal, before a payment is due, and — the one people actually miss —
    before the last day to cancel without being charged for another period.
+4. **What does all of it come to?** A cost summary in one currency, splitting
+   what we buy from what it costs to run our own products.
 
 > **Status: not deployed.** This runs entirely on your own machine while the
 > features and design are reviewed. It needs no Cloudflare account, no credit
@@ -98,8 +100,12 @@ records nothing. It is always safe to run, including against real data.
 - **Money is stored as integers** in minor units with an explicit currency.
   Never floats: `0.1 + 0.2 !== 0.3` is not an acceptable property for something
   that decides whether a bill is paid.
-- **No FX conversion.** Totals are per-currency. Applying today's rate to last
-  year's invoice would make historical totals change on every page load.
+- **Amounts keep their own currency** everywhere except where a single combined
+  figure is genuinely needed (the cost summary). There, each amount is converted
+  at the ECB reference rate of the month it belongs to — never today's rate —
+  so a past year's total is the same number every time it is asked for. Anything
+  with no usable rate is left out of the total and named on screen rather than
+  guessed at.
 - **Nothing is deleted.** Cancelled tools are archived and keep their payment
   history and audit trail. That is what makes this a ledger.
 - **"Overdue" is derived, not stored**, so a stale row can never disagree with
@@ -135,19 +141,41 @@ Note: a Worker cannot open a raw SMTP connection, so "send through our mailbox
 with an app password" is not available. Both supported email providers are
 HTTP APIs.
 
+## Our own products
+
+Hosting, domains and APIs are things we pay a vendor for, so they are ordinary
+tools. What makes them different is that they exist to keep one of *our*
+products running — so an internal product is a bucket a tool can be attributed
+to, and its running cost is the roll-up of those tools.
+
+The consequence: a hosting renewal chases its owner through exactly the same
+reminder path as a Canva renewal, with no new alerting code. Running cost is
+subscription and licence cash only; there is nowhere to record staff time, on
+purpose.
+
+## Exchange rates
+
+Monthly reference rates from the ECB's public API — no key, no account, no cost.
+Settings → **Exchange rates** shows what is stored and fetches more. The daily
+job keeps a trailing window current, because the ECB revises recent months and
+publishes a month only once it has ended.
+
+Only the cost summary needs them. Everything else stays in its own currency.
+
 ## Deploying later
 
-Deliberately not done yet. When you want it, the steps are: create a Cloudflare
-account, `wrangler d1 create tools_db`, paste the returned id into
-`wrangler.jsonc`, apply migrations, and `wrangler deploy`.
+Deliberately not done yet. **[DEPLOYMENT.md](DEPLOYMENT.md)** is the full
+runbook: Teams webhook setup, Cloudflare D1 and Worker deploy, secrets,
+Cloudflare Access sign-in, rollback, and an honest comparison with the
+Supabase + Azure alternative.
 
 Two things should land in the same pass, because the app has no access control
 of its own yet:
 
 - **Sign-in.** Cloudflare Access puts M365 SSO in front of the whole app with
-  **no application code** — it is a dashboard setting, free for up to 50 users.
-- **Reminder delivery.** Paste a Teams webhook into Settings, and add email
-  credentials if you want email too.
+  **no application code** — it is a dashboard setting, free for small teams.
+- **Reminder delivery.** Paste a Teams webhook into Settings and press
+  **Send test**; a card should arrive within seconds.
 
 `src/server/context.ts` has a single `actor()` function that every audit row
 already flows through; wiring real identity into it is a one-function change.
@@ -157,8 +185,8 @@ already flows through; wiring real identity into it is a one-function change.
 ```
 migrations/      schema (numbered, run in order)
 seed/            demo data -- never run against a real deployment
-src/shared/      types, validation, money, dates, alerts, metrics, CSV
-src/server/      Hono API, repository layer, notification channels, cron
+src/shared/      types, validation, money, fx, dates, alerts, metrics, ceo, CSV
+src/server/      Hono API, repository layer, notification channels, fx, cron
 src/client/      React app
 tests/           unit, API and end-to-end tests
 ```

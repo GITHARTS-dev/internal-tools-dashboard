@@ -23,12 +23,20 @@ import {
 import { advanceByCycle } from '../../shared/dates';
 import { parseCsv, toCsv } from '../../shared/csv';
 import { parseMoneyInput, toDecimalString } from '../../shared/money';
-import { toolCreateSchema, toolUpdateSchema } from '../../shared/schema';
+import {
+  internalProductCreateSchema,
+  internalProductUpdateSchema,
+  toolCreateSchema,
+  toolUpdateSchema,
+} from '../../shared/schema';
+import { computeCeoSummary } from '../../shared/ceo';
+import { rateTable, type FxRate } from '../../shared/fx';
 import {
   DEFAULT_SETTINGS,
   type AppSettings,
   type AuditEntry,
   type DataStatus,
+  type InternalProduct,
   type Payment,
   type Tool,
 } from '../../shared/types';
@@ -49,6 +57,42 @@ let tools: Tool[] = structuredClone(source.tools);
 let payments: Payment[] = structuredClone(source.payments);
 let audit: AuditEntry[] = structuredClone(source.audit);
 let rawSettings: Record<string, string> = { ...source.settings };
+
+let internalProducts: InternalProduct[] = [];
+
+/**
+ * Rates baked in for the demo.
+ *
+ * The standalone build has no server and cannot call the ECB from a file://
+ * page, so a small set of real reference rates ships with it. They are close
+ * to the published figures for these months, which is enough for the cost
+ * summary to demonstrate what it does. The live app fetches its own.
+ */
+const DEMO_RATES: FxRate[] = [
+  ['2025-09', 'USD', '1.1730'], ['2025-09', 'INR', '103.5600'],
+  ['2025-12', 'USD', '1.1620'], ['2025-12', 'INR', '104.8700'],
+  ['2026-03', 'USD', '1.1480'], ['2026-03', 'INR', '106.9200'],
+  ['2026-06', 'USD', '1.1518'], ['2026-06', 'INR', '109.3451'],
+  ['2026-08', 'USD', '1.1593'], ['2026-08', 'INR', '110.6529'],
+].map(([month, currency, rate]) => ({
+  month: month!,
+  currency: currency!,
+  rate: rate!,
+  source: 'ecb',
+  fetched_at: '2026-09-01T00:00:00.000Z',
+}));
+
+function demoRateTables(): Record<string, ReturnType<typeof rateTable>> {
+  const byMonth = new Map<string, FxRate[]>();
+  for (const rate of DEMO_RATES) {
+    const bucket = byMonth.get(rate.month);
+    if (bucket) bucket.push(rate);
+    else byMonth.set(rate.month, [rate]);
+  }
+  const out: Record<string, ReturnType<typeof rateTable>> = {};
+  for (const [month, entries] of byMonth) out[month] = rateTable(entries);
+  return out;
+}
 
 /** A touch of latency, so loading states are visible rather than skipped. */
 function reply<T>(value: T): Promise<T> {
@@ -87,6 +131,10 @@ function settings(): AppSettings {
     teams_webhook_url: rawSettings['teams_webhook_url'] ?? '',
     email_from: rawSettings['email_from'] ?? '',
     email_to: rawSettings['email_to'] ?? '',
+    reporting_currency: (
+      rawSettings['reporting_currency'] || DEFAULT_SETTINGS.reporting_currency
+    ).toUpperCase(),
+    fx_auto_refresh: rawSettings['fx_auto_refresh'] !== 'false',
   };
 }
 
@@ -584,6 +632,132 @@ export const demoApi = {
       auto_renew: tool.auto_renew ? 'yes' : 'no',
     }));
     download(kind === 'template' ? 'tools-template.csv' : 'tools.csv', toCsv(TOOL_CSV_COLUMNS, rows));
+  },
+
+  // --------------------------------------------------- internal products
+
+  async internalProducts() {
+    return reply({
+      products: internalProducts.map((product) => ({
+        ...product,
+        tool_count: tools.filter((t) => t.internal_product_id === product.id).length,
+      })),
+    });
+  },
+
+  async internalProduct(id: string) {
+    const product = internalProducts.find((p) => p.id === id);
+    if (!product) throw new ApiError('No internal product with that id.', 404);
+    return reply({
+      product,
+      tools: tools.filter((t) => t.internal_product_id === id),
+    });
+  },
+
+  async createInternalProduct(body: unknown) {
+    const parsed = internalProductCreateSchema.safeParse(body);
+    if (!parsed.success) {
+      const fields: Record<string, string> = {};
+      for (const issue of parsed.error.issues) {
+        const key = issue.path.map(String).join('.') || '_';
+        if (!fields[key]) fields[key] = issue.message;
+      }
+      throw new ApiError('Some fields need fixing.', 400, fields);
+    }
+    const now = new Date().toISOString();
+    const product: InternalProduct = {
+      id: uid(),
+      ...parsed.data,
+      created_at: now,
+      updated_at: now,
+    } as InternalProduct;
+    internalProducts = [...internalProducts, product];
+    return reply({ product });
+  },
+
+  async updateInternalProduct(id: string, body: unknown) {
+    const parsed = internalProductUpdateSchema.safeParse(body);
+    if (!parsed.success) throw new ApiError('Some fields need fixing.', 400);
+    const index = internalProducts.findIndex((p) => p.id === id);
+    if (index === -1) throw new ApiError('No internal product with that id.', 404);
+
+    const sent = new Set(Object.keys((body ?? {}) as Record<string, unknown>));
+    const patch = Object.fromEntries(
+      Object.entries(parsed.data).filter(([key]) => sent.has(key)),
+    );
+    const product = {
+      ...internalProducts[index]!,
+      ...patch,
+      updated_at: new Date().toISOString(),
+    } as InternalProduct;
+    internalProducts = internalProducts.map((p) => (p.id === id ? product : p));
+    return reply({ product });
+  },
+
+  async deleteInternalProduct(id: string) {
+    const released = tools.filter((t) => t.internal_product_id === id).length;
+    // Matches the server's ON DELETE SET NULL: the tools survive, unattributed.
+    tools = tools.map((t) => (t.internal_product_id === id ? { ...t, internal_product_id: null } : t));
+    internalProducts = internalProducts.filter((p) => p.id !== id);
+    return reply({ deleted: true as const, tools_released: released });
+  },
+
+  async ceoSummary() {
+    return reply(
+      computeCeoSummary({
+        tools,
+        payments,
+        products: internalProducts,
+        tables: demoRateTables(),
+        reportingCurrency: settings().reporting_currency,
+        today: DEMO_TODAY,
+      }),
+    );
+  },
+
+  // ------------------------------------------------------------------ FX
+
+  async fxStatus() {
+    const currencies = [...new Set(DEMO_RATES.map((r) => r.currency))].sort();
+    const months = [...new Set(DEMO_RATES.map((r) => r.month))].sort();
+    const inUse = new Set<string>([settings().reporting_currency]);
+    for (const tool of tools) inUse.add(tool.currency.toUpperCase());
+    for (const payment of payments) inUse.add(payment.currency.toUpperCase());
+
+    return reply({
+      status: {
+        months: months.length,
+        currencies,
+        earliest: months[0] ?? null,
+        latest: months[months.length - 1] ?? null,
+        last_fetched_at: '2026-09-01T00:00:00.000Z',
+      },
+      reporting_currency: settings().reporting_currency,
+      auto_refresh: false,
+      currencies_in_use: [...inUse].sort(),
+    });
+  },
+
+  async fxRates() {
+    return reply({ rates: DEMO_RATES });
+  },
+
+  async refreshFx(): Promise<never> {
+    throw new ApiError(
+      'This demo ships with a fixed set of rates and cannot reach the ECB. Run the app locally to fetch live rates.',
+      400,
+    );
+  },
+
+  async setFxRate(): Promise<never> {
+    throw new ApiError('Rates are fixed in this demo.', 400);
+  },
+
+  async testChannel(): Promise<never> {
+    throw new ApiError(
+      'This demo has no server, so it cannot send a test message. Run the app locally to try your webhook.',
+      400,
+    );
   },
 };
 

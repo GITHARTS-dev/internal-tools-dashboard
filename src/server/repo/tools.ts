@@ -8,6 +8,7 @@ const WRITABLE = [
   'billing_cycle', 'cost_amount', 'currency', 'seats_purchased', 'seats_used',
   'renewal_date', 'auto_renew', 'cancellation_notice_days', 'account_ref',
   'billing_email', 'payment_method', 'vendor_url', 'notes', 'started_on', 'cancelled_on',
+  'internal_product_id',
 ] as const;
 
 type ToolRow = Record<string, unknown>;
@@ -23,6 +24,8 @@ export interface ToolFilters {
   search?: string;
   /** Default false: cancelled and expired tools live on the History screen. */
   includeArchived?: boolean;
+  /** Tools attributed to one internal product; 'none' means unattributed. */
+  internalProductId?: string;
 }
 
 export async function listTools(db: Db, filters: ToolFilters = {}): Promise<Tool[]> {
@@ -42,6 +45,12 @@ export async function listTools(db: Db, filters: ToolFilters = {}): Promise<Tool
   if (filters.owner) {
     where.push('(owner_email = ? OR owner_name = ?)');
     params.push(filters.owner, filters.owner);
+  }
+  if (filters.internalProductId === 'none') {
+    where.push('internal_product_id IS NULL');
+  } else if (filters.internalProductId) {
+    where.push('internal_product_id = ?');
+    params.push(filters.internalProductId);
   }
   if (filters.search) {
     const like = `%${filters.search.toLowerCase()}%`;

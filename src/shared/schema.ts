@@ -111,9 +111,30 @@ export const toolCreateSchema = z.object({
 
   started_on: optDate(),
   cancelled_on: optDate(),
+
+  /** Attribution to one of our own products; null means bought SaaS. */
+  internal_product_id: optText(60),
 });
 
 export const toolUpdateSchema = toolCreateSchema.partial();
+
+export const INTERNAL_PRODUCT_STATUSES = ['live', 'building', 'retired'] as const;
+
+export const internalProductCreateSchema = z.object({
+  name: z.string().trim().min(1, 'Every product needs a name').max(120),
+  description: optText(500),
+  status: z.enum(INTERNAL_PRODUCT_STATUSES).default('live'),
+  owner_name: optText(120),
+  owner_email: z.preprocess(
+    (v) => (v === '' || v === undefined ? null : v),
+    z.string().trim().toLowerCase().email('That does not look like an email address').nullable(),
+  ),
+  launched_on: optDate(),
+  retired_on: optDate(),
+  notes: optText(4000),
+});
+
+export const internalProductUpdateSchema = internalProductCreateSchema.partial();
 
 export const paymentCreateSchema = z.object({
   tool_id: z.string().trim().min(1),
@@ -155,6 +176,8 @@ export const documentCreateSchema = z.object({
 
 export const settingsUpdateSchema = z.record(z.string(), z.string());
 
+export type InternalProductCreateInput = z.infer<typeof internalProductCreateSchema>;
+export type InternalProductUpdateInput = z.infer<typeof internalProductUpdateSchema>;
 export type ToolCreateInput = z.infer<typeof toolCreateSchema>;
 export type ToolUpdateInput = z.infer<typeof toolUpdateSchema>;
 export type PaymentCreateInput = z.infer<typeof paymentCreateSchema>;

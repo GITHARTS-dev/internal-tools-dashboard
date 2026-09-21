@@ -313,6 +313,186 @@ export function ColumnChart({ points, currency }: { points: ColumnPoint[]; curre
   );
 }
 
+// ------------------------------------------------------------- area trend
+
+export interface TrendPoint {
+  label: string;
+  fullLabel: string;
+  value: number;
+}
+
+/**
+ * Spend over a long window, as an area.
+ *
+ * A line beats columns here: across two years the question is the shape of the
+ * curve, not the value of any one month, and twenty-four separate bars force
+ * the eye to compare heights one pair at a time. One measure, so one hue and
+ * no legend -- the card title names what is plotted.
+ *
+ * `splitAt` draws the boundary between the two comparison windows, which is
+ * what turns "here is a line" into "this half against that half".
+ */
+export function AreaTrend({
+  points,
+  currency,
+  splitAt,
+}: {
+  points: TrendPoint[];
+  currency: string;
+  splitAt?: number;
+}) {
+  const { show, hide, node } = useTooltip();
+  const [ref, width] = useMeasuredWidth();
+  const [hover, setHover] = useState<number | null>(null);
+
+  if (points.length === 0) return <Empty>No payments recorded yet.</Empty>;
+
+  const height = 210;
+  const padLeft = 8;
+  const padRight = 8;
+  const padTop = 18;
+  const padBottom = 26;
+  const plotHeight = height - padTop - padBottom;
+  const plotWidth = Math.max(0, width - padLeft - padRight);
+  const max = niceCeiling(Math.max(...points.map((p) => p.value), 1));
+
+  const xFor = (i: number) =>
+    points.length === 1 ? padLeft + plotWidth / 2 : padLeft + (i / (points.length - 1)) * plotWidth;
+  const yFor = (v: number) => padTop + plotHeight - (v / max) * plotHeight;
+
+  const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${xFor(i)},${yFor(p.value)}`).join(' ');
+  const area = `${line} L${xFor(points.length - 1)},${padTop + plotHeight} L${xFor(0)},${padTop + plotHeight} Z`;
+
+  const ticks = [0, max / 2, max];
+
+  function pointAt(clientX: number, rect: DOMRect): number {
+    const ratio = (clientX - rect.left - padLeft) / Math.max(plotWidth, 1);
+    return Math.max(0, Math.min(points.length - 1, Math.round(ratio * (points.length - 1))));
+  }
+
+  return (
+    <div ref={ref}>
+      {width > 0 ? (
+        <svg
+          className="chart"
+          height={height}
+          width={width}
+          viewBox={`0 0 ${width} ${height}`}
+          role="img"
+          aria-label={`Amount paid per month over ${points.length} months. ${points
+            .map((p) => `${p.fullLabel}: ${formatMoney(p.value, currency)}`)
+            .join('. ')}`}
+          onMouseMove={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const i = pointAt(event.clientX, rect);
+            setHover(i);
+            const point = points[i];
+            if (point) {
+              show(event, (
+                <>
+                  <div className="tip-title">{point.fullLabel}</div>
+                  <div className="tip-row">{formatMoney(point.value, currency)} paid</div>
+                </>
+              ));
+            }
+          }}
+          onMouseLeave={() => {
+            setHover(null);
+            hide();
+          }}
+        >
+          <defs>
+            <linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--series-1)" stopOpacity="0.22" />
+              <stop offset="100%" stopColor="var(--series-1)" stopOpacity="0.02" />
+            </linearGradient>
+          </defs>
+
+          {ticks.map((tick) => {
+            const y = yFor(tick);
+            return (
+              <g key={tick}>
+                <line className="gridline" x1={padLeft} x2={width - padRight} y1={y} y2={y} />
+                <text className="axis-label" x={padLeft} y={y - 4}>
+                  {axisTick(tick, currency)}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* The boundary between the two 12-month windows being compared. */}
+          {splitAt !== undefined && splitAt > 0 && splitAt < points.length ? (
+            <line
+              className="split-rule"
+              x1={xFor(splitAt) - (plotWidth / (points.length - 1)) / 2}
+              x2={xFor(splitAt) - (plotWidth / (points.length - 1)) / 2}
+              y1={padTop - 6}
+              y2={padTop + plotHeight}
+            />
+          ) : null}
+
+          <path d={area} fill="url(#trend-fill)" />
+          <path
+            d={line}
+            fill="none"
+            stroke="var(--series-1)"
+            strokeWidth={2}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+
+          <line
+            className="baseline"
+            x1={padLeft}
+            x2={width - padRight}
+            y1={padTop + plotHeight}
+            y2={padTop + plotHeight}
+          />
+
+          {hover !== null && points[hover] ? (
+            <g>
+              <line
+                className="crosshair"
+                x1={xFor(hover)}
+                x2={xFor(hover)}
+                y1={padTop}
+                y2={padTop + plotHeight}
+              />
+              <circle
+                cx={xFor(hover)}
+                cy={yFor(points[hover]!.value)}
+                r={5}
+                fill="var(--series-1)"
+                stroke="var(--surface-1)"
+                strokeWidth={2}
+              />
+            </g>
+          ) : null}
+
+          {points.map((point, i) => {
+            const every = Math.max(1, Math.ceil(points.length / 6));
+            if (i % every !== 0 && i !== points.length - 1) return null;
+            return (
+              // fullLabel, not label: across two years the short month name
+              // repeats, and a duplicate key silently drops a tick.
+              <text
+                key={point.fullLabel}
+                className="axis-label"
+                x={xFor(i)}
+                y={height - 8}
+                textAnchor={i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle'}
+              >
+                {point.label}
+              </text>
+            );
+          })}
+        </svg>
+      ) : null}
+      {node}
+    </div>
+  );
+}
+
 // --------------------------------------------------------- renewal timeline
 
 export interface TimelineItem {

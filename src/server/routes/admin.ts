@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { settingsUpdateSchema } from '../../shared/schema';
-import { isIsoDate } from '../../shared/dates';
+import { isIsoDate, todayInTimezone } from '../../shared/dates';
+import type { Alert } from '../../shared/types';
 import type { AppContext, Env } from '../context';
 import { actor, db, envVars, featureDocuments, zodErrorResponse } from '../context';
 import { clearAllData, dataStatus, loadDemoData, removeDemoData } from '../repo/demo';
@@ -80,6 +81,81 @@ adminRoutes.post('/reminders/run', async (c) => {
     summary: `Ran reminders for ${run.today}`,
   });
   return c.json(run);
+});
+
+/**
+ * Send one real message down a channel, right now.
+ *
+ * This is what closes the loop on pasting a webhook URL: without it the only
+ * way to know the URL works is to wait for tomorrow's cron and see whether
+ * anything arrives. It sends a clearly-labelled test card and records nothing
+ * in the notification log, so it can never suppress a real reminder by
+ * consuming its dedupe key.
+ */
+adminRoutes.post('/channels/:name/test', async (c) => {
+  const name = c.req.param('name');
+  const channel = DEFAULT_CHANNELS.find((ch) => ch.name === name);
+  if (!channel) {
+    return c.json(
+      { error: 'not_found', message: `No channel called ${name}. Try: ${DEFAULT_CHANNELS.map((ch) => ch.name).join(', ')}.` },
+      404,
+    );
+  }
+
+  const settings = await getSettings(db(c));
+  if (!channel.isConfigured(settings, envVars(c))) {
+    return c.json(
+      {
+        error: 'not_configured',
+        message:
+          name === 'teams'
+            ? 'Paste a Teams webhook URL into Settings first, then test again.'
+            : `The ${name} channel has nothing to send with yet.`,
+      },
+      400,
+    );
+  }
+
+  // A synthetic alert, so the card exercises the real rendering path rather
+  // than a special "test" layout that could look fine while the real one breaks.
+  const today = todayInTimezone(settings.timezone);
+  const sample: Alert = {
+    rule: 'renewal_upcoming',
+    severity: 'info',
+    tool_id: 'test',
+    tool_name: 'Test message',
+    payment_id: null,
+    title: 'Test message from the tools dashboard',
+    detail: 'If you can read this in Teams, the webhook works. Nothing was logged.',
+    date: today,
+    days_until: 0,
+    amount: null,
+    currency: null,
+    owner_name: null,
+    owner_email: null,
+    dedupe_key: `test:${Date.now()}`,
+  };
+
+  const result = await channel.send(
+    {
+      title: 'Tools & subscriptions: test message',
+      text: 'If you can read this, the webhook works. Nothing was recorded.',
+      alerts: [sample],
+      kind: 'alerts',
+    },
+    settings,
+    envVars(c),
+  );
+
+  await recordAudit(db(c), {
+    entity: 'channel',
+    entity_id: name,
+    action: 'update',
+    actor: actor(c),
+    summary: `Sent a test message to ${name}: ${result.status}`,
+  });
+
+  return c.json({ result }, result.status === 'failed' ? 502 : 200);
 });
 
 /**

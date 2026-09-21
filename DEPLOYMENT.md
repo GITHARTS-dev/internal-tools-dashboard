@@ -62,6 +62,16 @@ adding a migration applies only the new one.
 **Do not** load `seed/dev-seed.sql` into this database. Those rows are
 fictional.
 
+### If you share an existing Supabase project
+
+Prefer a **separate project**. This app's tables have plain names like `tools`,
+`settings` and `audit_log`, and the migrations create them in the `public`
+schema. Run them in a project that already has other tables and a name
+collision either fails the migration or, worse, succeeds against someone else's
+table. Check how many free projects your Supabase organisation allows before
+assuming you can add one; if it is at its limit, ask whoever owns it rather than
+squeezing this into the timesheet app's database.
+
 ### On the free tier pausing
 
 Supabase pauses a free project after a period of inactivity — I believe about a
@@ -217,6 +227,11 @@ GET /api/reminders/dry-run?date=2026-10-01
 ```
 
 To fire it by hand: Actions tab → **Send due reminders** → Run workflow.
+
+**The schedule only runs from the repository's default branch.** GitHub ignores
+a `schedule:` trigger on any other branch, so `reminders.yml` does nothing until
+it is on `main`. Manual runs work from any branch, which is enough for testing;
+merge to `main` before relying on the daily check.
 
 ### Why the schedule is not in Azure
 

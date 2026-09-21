@@ -10,11 +10,13 @@ import type {
   KpiSummary,
   NotificationEntry,
   Payment,
+  ProductCost,
   RenewalTimelineEntry,
   Tool,
   ToolDocument,
 } from '../../shared/types';
 import type { FxRate } from '../../shared/fx';
+import type { ProductUsage } from '../../shared/productCosts';
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -118,6 +120,12 @@ export interface FxRefreshResponse {
 }
 
 export type InternalProductWithCount = InternalProduct & { tool_count: number };
+
+export interface ProductCostsResponse {
+  costs: ProductCost[];
+  reporting_currency: string;
+  usage: ProductUsage;
+}
 
 export const api = {
   isDemo: false,
@@ -257,6 +265,21 @@ export const api = {
     }),
   deleteInternalProduct: (id: string) =>
     request<{ deleted: true; tools_released: number }>(`/internal-products/${id}`, {
+      method: 'DELETE',
+    }),
+
+  productCosts: (productId: string) =>
+    request<ProductCostsResponse>(`/internal-products/${productId}/costs`),
+  recordProductCost: (
+    productId: string,
+    body: { month: string; provider: string; amount: number; currency: string; note: string },
+  ) =>
+    request<{ cost: ProductCost }>(`/internal-products/${productId}/costs`, {
+      method: 'POST',
+      ...json(body),
+    }),
+  deleteProductCost: (productId: string, costId: string) =>
+    request<{ deleted: true }>(`/internal-products/${productId}/costs/${costId}`, {
       method: 'DELETE',
     }),
 

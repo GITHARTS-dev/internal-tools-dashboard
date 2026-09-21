@@ -26,9 +26,13 @@ import { parseMoneyInput, toDecimalString } from '../../shared/money';
 import {
   internalProductCreateSchema,
   internalProductUpdateSchema,
+  productCostSchema,
   toolCreateSchema,
   toolUpdateSchema,
 } from '../../shared/schema';
+import { computeProductUsage } from '../../shared/productCosts';
+import { monthOf } from '../../shared/fx';
+import { formatMoney } from '../../shared/money';
 import { computeCeoSummary } from '../../shared/ceo';
 import { rateTable, type FxRate } from '../../shared/fx';
 import {
@@ -38,6 +42,7 @@ import {
   type DataStatus,
   type InternalProduct,
   type Payment,
+  type ProductCost,
   type Tool,
 } from '../../shared/types';
 import { ApiError } from '../lib/errors';
@@ -59,6 +64,7 @@ let audit: AuditEntry[] = structuredClone(source.audit);
 let rawSettings: Record<string, string> = { ...source.settings };
 
 let internalProducts: InternalProduct[] = [];
+let productCosts: ProductCost[] = [];
 
 /**
  * Rates baked in for the demo.
@@ -695,11 +701,89 @@ export const demoApi = {
   },
 
   async deleteInternalProduct(id: string) {
+    const recorded = productCosts.filter((c) => c.product_id === id).length;
+    if (recorded > 0) {
+      const name = internalProducts.find((p) => p.id === id)?.name ?? 'That product';
+      throw new ApiError(
+        `${name} has ${recorded} recorded monthly ${recorded === 1 ? 'cost' : 'costs'}, so it cannot be removed. Set its status to Retired instead; the history stays.`,
+        409,
+      );
+    }
     const released = tools.filter((t) => t.internal_product_id === id).length;
     // Matches the server's ON DELETE SET NULL: the tools survive, unattributed.
     tools = tools.map((t) => (t.internal_product_id === id ? { ...t, internal_product_id: null } : t));
     internalProducts = internalProducts.filter((p) => p.id !== id);
     return reply({ deleted: true as const, tools_released: released });
+  },
+
+  async productCosts(productId: string) {
+    if (!internalProducts.some((p) => p.id === productId)) {
+      throw new ApiError('No internal product with that id.', 404);
+    }
+    const costs = productCosts
+      .filter((c) => c.product_id === productId)
+      .sort((a, b) => b.month.localeCompare(a.month) || a.provider.localeCompare(b.provider));
+    return reply({
+      costs,
+      reporting_currency: settings().reporting_currency,
+      usage: computeProductUsage(costs, demoRateTables(), settings().reporting_currency, DEMO_TODAY),
+    });
+  },
+
+  async recordProductCost(productId: string, body: unknown) {
+    const product = internalProducts.find((p) => p.id === productId);
+    if (!product) throw new ApiError('No internal product with that id.', 404);
+
+    const parsed = productCostSchema.safeParse(body);
+    if (!parsed.success) {
+      const fields: Record<string, string> = {};
+      for (const issue of parsed.error.issues) {
+        const key = issue.path.map(String).join('.') || '_';
+        if (!fields[key]) fields[key] = issue.message;
+      }
+      throw new ApiError('Some fields need fixing.', 400, fields);
+    }
+    if (parsed.data.month > monthOf(DEMO_TODAY)) {
+      throw new ApiError('Some fields need fixing.', 400, { month: 'That month has not happened yet' });
+    }
+
+    const stamp = new Date().toISOString();
+    const existing = productCosts.find(
+      (c) =>
+        c.product_id === productId &&
+        c.month === parsed.data.month &&
+        c.provider.toLowerCase() === parsed.data.provider.toLowerCase(),
+    );
+
+    const cost: ProductCost = existing
+      ? { ...existing, ...parsed.data, note: parsed.data.note ?? null, updated_at: stamp }
+      : {
+          id: uid(),
+          product_id: productId,
+          ...parsed.data,
+          note: parsed.data.note ?? null,
+          source: 'manual',
+          created_at: stamp,
+          updated_at: stamp,
+        };
+
+    productCosts = existing
+      ? productCosts.map((c) => (c.id === existing.id ? cost : c))
+      : [...productCosts, cost];
+    record(
+      'product_cost',
+      cost.id,
+      existing ? 'update' : 'create',
+      `${existing ? 'Replaced' : 'Recorded'} ${cost.provider} for ${product.name}, ${cost.month}: ${formatMoney(cost.amount, cost.currency)}`,
+    );
+    return reply({ cost });
+  },
+
+  async deleteProductCost(productId: string, costId: string) {
+    const cost = productCosts.find((c) => c.id === costId && c.product_id === productId);
+    if (!cost) throw new ApiError('No such cost on this product.', 404);
+    productCosts = productCosts.filter((c) => c.id !== costId);
+    return reply({ deleted: true as const });
   },
 
   async ceoSummary() {
@@ -708,6 +792,7 @@ export const demoApi = {
         tools,
         payments,
         products: internalProducts,
+        monthlyCosts: productCosts,
         tables: demoRateTables(),
         reportingCurrency: settings().reporting_currency,
         today: DEMO_TODAY,

@@ -761,6 +761,26 @@ input[type='checkbox'] { min-width: auto; accent-color: var(--series-1); width: 
 /* Two short cards sharing one grid cell, so they match a tall neighbour. */
 .stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
+/* ----------------------------------------------------- monthly cost entry */
+
+.usage-line { font-size: 13px; color: var(--text-secondary); max-width: 78ch; }
+.usage-line strong { color: var(--text-primary); font-weight: 620; font-variant-numeric: tabular-nums; }
+
+/*
+ * Month and currency are short; provider and amount take the room. The wide
+ * note field drops to its own row rather than squeezing the four above it.
+ */
+.cost-form { grid-template-columns: 170px minmax(150px, 1.2fr) minmax(130px, 1fr) 96px; }
+@media (max-width: 720px) {
+  .cost-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+td.row-actions { text-align: right; white-space: nowrap; width: 1%; }
+td.row-actions .btn + .btn { margin-left: 2px; }
+
+/* A quiet rule between months, so a run of providers reads as one group. */
+tbody tr.month-start td { border-top: 1px solid var(--border-strong); }
+
 /* A card that should recede: provenance, not findings. */
 .card.is-quiet { background: transparent; border-style: dashed; }
 .card.is-quiet h2 { font-size: 14px; color: var(--text-secondary); }

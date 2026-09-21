@@ -19,6 +19,7 @@
 
 import { annualisedCost, monthlyCost, wastedSeatCost } from './money';
 import { addMonthsToYearMonth, monthOf, sumConverted, type RateTable, type YearMonth } from './fx';
+import { computeProductUsage } from './productCosts';
 import type {
   CeoSummary,
   InternalProduct,
@@ -26,6 +27,7 @@ import type {
   IsoDate,
   Payment,
   PeriodComparison,
+  ProductCost,
   RankedSpend,
   Tool,
 } from './types';
@@ -50,6 +52,12 @@ export interface CeoSummaryInput {
   tools: Tool[];
   payments: Payment[];
   products: InternalProduct[];
+  /**
+   * Usage-based costs recorded per product per month. Optional so callers with
+   * no product costs (and the tests written before they existed) need not pass
+   * an empty list.
+   */
+  monthlyCosts?: ProductCost[];
   tables: Record<YearMonth, RateTable>;
   reportingCurrency: string;
   today: IsoDate;
@@ -57,6 +65,7 @@ export interface CeoSummaryInput {
 
 export function computeCeoSummary(input: CeoSummaryInput): CeoSummary {
   const { tools, payments, products, tables, today } = input;
+  const monthlyCosts = input.monthlyCosts ?? [];
   const target = input.reportingCurrency.toUpperCase();
 
   const available = Object.keys(tables).sort();
@@ -113,16 +122,52 @@ export function computeCeoSummary(input: CeoSummaryInput): CeoSummary {
     return result.gaps.length > 0 && result.amount === 0 ? null : result.amount;
   }
 
+  const costsByProduct = new Map<string, ProductCost[]>();
+  for (const cost of monthlyCosts) {
+    const bucket = costsByProduct.get(cost.product_id);
+    if (bucket) bucket.push(cost);
+    else costsByProduct.set(cost.product_id, [cost]);
+  }
+
   const productCosts: InternalProductCost[] = products
     .map((product) => {
       const bucket = perProduct.get(product.id)!;
+
+      // The fixed part: subscriptions attributed to the product.
+      const fixedMonthly = reportTotal(bucket.monthly);
+      const fixedAnnual = reportTotal(bucket.annual);
+
+      // The usage part: what was actually billed, averaged over recent complete
+      // months. Null means nothing usable was entered -- unknown, not free.
+      const usage = computeProductUsage(costsByProduct.get(product.id) ?? [], tables, target, today);
+      for (const gap of usage.gaps) {
+        const key = `${gap.currency}::${gap.month ?? ''}`;
+        const existing = gaps.get(key);
+        if (existing) existing.count += gap.count;
+        else gaps.set(key, { ...gap });
+      }
+      for (const month of usage.rate_months) monthsUsed.add(month);
+
+      const usageMonthly = usage.average_reported;
+      const usageAnnual = usageMonthly === null ? null : usageMonthly * 12;
+
       return {
         product,
         tool_count: bucket.count,
         monthly: bucket.monthly,
         annual: bucket.annual,
-        monthly_reported: reportTotal(bucket.monthly),
-        annual_reported: reportTotal(bucket.annual),
+        fixed_monthly_reported: fixedMonthly,
+        fixed_annual_reported: fixedAnnual,
+        usage_monthly_reported: usageMonthly,
+        usage_annual_reported: usageAnnual,
+        usage_months_counted: usage.months_counted,
+        last_cost_month: usage.last_cost_month,
+        // A retired product is not expected to keep getting bills entered.
+        latest_month_missing: product.status !== 'retired' && usage.latest_month_missing,
+        // Fixed + usage. A fixed part that could not be converted makes the
+        // total unknown; a usage part that is unknown simply adds nothing.
+        monthly_reported: fixedMonthly === null ? null : fixedMonthly + (usageMonthly ?? 0),
+        annual_reported: fixedAnnual === null ? null : fixedAnnual + (usageAnnual ?? 0),
       };
     })
     .sort((a, b) => (b.annual_reported ?? 0) - (a.annual_reported ?? 0) || a.product.name.localeCompare(b.product.name));
@@ -130,16 +175,26 @@ export function computeCeoSummary(input: CeoSummaryInput): CeoSummary {
   const internalMonthly: Record<string, number> = {};
   const internalAnnual: Record<string, number> = {};
   let internalToolCount = 0;
+  let usageMonthlySum = 0;
+  let usageAnnualSum = 0;
+  let anyUsage = false;
   for (const cost of productCosts) {
     for (const [cur, amt] of Object.entries(cost.monthly)) addTo(internalMonthly, cur, amt);
     for (const [cur, amt] of Object.entries(cost.annual)) addTo(internalAnnual, cur, amt);
     internalToolCount += cost.tool_count;
+    if (cost.usage_monthly_reported !== null) {
+      anyUsage = true;
+      usageMonthlySum += cost.usage_monthly_reported;
+      usageAnnualSum += cost.usage_annual_reported ?? 0;
+    }
   }
 
   const subsMonthlyReported = reportTotal(subsMonthly);
   const subsAnnualReported = reportTotal(subsAnnual);
-  const internalMonthlyReported = reportTotal(internalMonthly);
-  const internalAnnualReported = reportTotal(internalAnnual);
+  const internalFixedMonthly = reportTotal(internalMonthly);
+  const internalFixedAnnual = reportTotal(internalAnnual);
+  const internalMonthlyReported = internalFixedMonthly === null ? null : internalFixedMonthly + usageMonthlySum;
+  const internalAnnualReported = internalFixedAnnual === null ? null : internalFixedAnnual + usageAnnualSum;
 
   // ------------------------------------------------- historical paid spend
   // Each payment at its own month's rate, which is what makes a past year's
@@ -149,6 +204,17 @@ export function computeCeoSummary(input: CeoSummaryInput): CeoSummary {
     if (payment.status !== 'paid' || !payment.paid_on) continue;
     const year = payment.paid_on.slice(0, 4);
     const entry = { amount: payment.amount, currency: payment.currency, month: monthOf(payment.paid_on) };
+    const bucket = paidByYear.get(year);
+    if (bucket) bucket.push(entry);
+    else paidByYear.set(year, [entry]);
+  }
+
+  // Usage costs are money actually spent, so they belong in the history too.
+  // Leaving them out would put the AWS bill in the run rate but not in "what we
+  // paid", and the trend would understate what the company really spent.
+  for (const cost of monthlyCosts) {
+    const year = cost.month.slice(0, 4);
+    const entry = { amount: cost.amount, currency: cost.currency, month: cost.month };
     const bucket = paidByYear.get(year);
     if (bucket) bucket.push(entry);
     else paidByYear.set(year, [entry]);
@@ -188,6 +254,13 @@ export function computeCeoSummary(input: CeoSummaryInput): CeoSummary {
     const bucket = monthTotals.get(month);
     if (bucket) bucket.push(entry);
     else monthTotals.set(month, [entry]);
+  }
+
+  for (const cost of monthlyCosts) {
+    const entry = { amount: cost.amount, currency: cost.currency, month: cost.month };
+    const bucket = monthTotals.get(cost.month);
+    if (bucket) bucket.push(entry);
+    else monthTotals.set(cost.month, [entry]);
   }
 
   const thisMonth = monthOf(today);
@@ -288,6 +361,7 @@ export function computeCeoSummary(input: CeoSummaryInput): CeoSummary {
 
   return {
     today,
+    latest_complete_month: lastComplete,
     reporting_currency: target,
     subscriptions: {
       tool_count: subsCount,
@@ -299,6 +373,7 @@ export function computeCeoSummary(input: CeoSummaryInput): CeoSummary {
       tool_count: internalToolCount,
       monthly_reported: internalMonthlyReported,
       annual_reported: internalAnnualReported,
+      usage_annual_reported: anyUsage ? usageAnnualSum : null,
     },
     products: productCosts,
     total_monthly_reported: totalMonthly,

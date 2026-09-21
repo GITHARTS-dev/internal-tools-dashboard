@@ -47,9 +47,10 @@ export interface Tool {
 export type InternalProductStatus = 'live' | 'building' | 'retired';
 
 /**
- * One of the company's own products. Its running cost is not stored here:
- * it is the roll-up of the tools attributed to it, so there is exactly one
- * ledger and one definition of what a cost is.
+ * One of the company's own products. Its running cost is not stored on it. It
+ * has two parts, both computed elsewhere: the fixed subscriptions attributed to
+ * it (hosting plans, domains) and the usage-based costs recorded month by month
+ * (see ProductCost), which vary too much to be a price times a billing cycle.
  */
 export interface InternalProduct {
   id: string;
@@ -61,6 +62,29 @@ export interface InternalProduct {
   launched_on: IsoDate | null;
   retired_on: IsoDate | null;
   notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * What one of our own products actually cost in one month, for one provider.
+ *
+ * Recorded, not derived: usage-based cloud spend differs every month, so it is
+ * the amount that was really billed rather than a list price times a cycle.
+ */
+export interface ProductCost {
+  id: string;
+  product_id: string;
+  /** 'YYYY-MM' */
+  month: string;
+  /** Free text -- AWS, Supabase, a domain registrar. Unique per month, case-insensitively. */
+  provider: string;
+  /** Minor units. */
+  amount: number;
+  currency: string;
+  /** 'manual' today; reserved so a later import can be told apart from a typed figure. */
+  source: 'manual' | 'aws';
+  note: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -243,10 +267,30 @@ export interface DashboardData {
 export interface InternalProductCost {
   product: InternalProduct;
   tool_count: number;
-  /** Per-currency, before any conversion. */
+  /**
+   * The fixed part: subscriptions attributed to this product, per currency and
+   * before conversion. Usage costs are not here -- they are recorded per month
+   * and only exist in converted form.
+   */
   monthly: Record<string, number>;
   annual: Record<string, number>;
-  /** Converted into the reporting currency; null when rates were missing. */
+  /** Fixed subscriptions only, converted. Null when rates were missing. */
+  fixed_monthly_reported: number | null;
+  fixed_annual_reported: number | null;
+  /**
+   * Usage-based costs, as a recent monthly average and that average x 12.
+   * Null when no month in the window has been entered, which is "unknown", not
+   * "free".
+   */
+  usage_monthly_reported: number | null;
+  usage_annual_reported: number | null;
+  /** How many of the last three complete months the average is over. */
+  usage_months_counted: number;
+  /** The most recent month with any entry, complete or not. */
+  last_cost_month: string | null;
+  /** True when last month's costs have not been entered yet. */
+  latest_month_missing: boolean;
+  /** Fixed + usage. What the dashboard shows for this product. */
   monthly_reported: number | null;
   annual_reported: number | null;
 }
@@ -291,6 +335,8 @@ export interface PeriodComparison {
  */
 export interface CeoSummary {
   today: IsoDate;
+  /** The most recent month that has fully ended: the one whose costs should be in by now. */
+  latest_complete_month: string;
   reporting_currency: string;
   /** Bought SaaS: tools not attributed to one of our own products. */
   subscriptions: {
@@ -302,8 +348,11 @@ export interface CeoSummary {
   internal: {
     product_count: number;
     tool_count: number;
+    /** Fixed subscriptions + usage. */
     monthly_reported: number | null;
     annual_reported: number | null;
+    /** The usage-based part of that, so the screen can say how much of it varies. */
+    usage_annual_reported: number | null;
   };
   products: InternalProductCost[];
   total_monthly_reported: number | null;

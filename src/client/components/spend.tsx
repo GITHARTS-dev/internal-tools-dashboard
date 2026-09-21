@@ -91,12 +91,15 @@ export function SpendLead({
   const combined = bought + internal;
   const boughtPct = combined > 0 ? (bought / combined) * 100 : 0;
   const hasNative = native !== undefined && Object.keys(native).length > 1;
+  // Once cloud usage is in the figure it is no longer purely a commitment, and
+  // calling it one would overstate how fixed it is.
+  const hasUsage = summary.internal.usage_annual_reported !== null;
 
   return (
     <section className="lead" aria-labelledby="lead-heading">
       <div className="lead-main">
         <h2 id="lead-heading" className="lead-label">
-          Committed spend
+          {hasUsage ? 'Annual spend' : 'Committed spend'}
         </h2>
 
         <div className="lead-figure">
@@ -113,8 +116,10 @@ export function SpendLead({
         */}
         <div className="lead-meta">
           <span className="lead-rate">
-            What we are committed to at today&rsquo;s prices ·{' '}
-            <Money amount={summary.total_monthly_reported} currency={currency} /> a month
+            {hasUsage
+              ? 'Subscriptions at today\u2019s prices, plus cloud usage at its recent average'
+              : 'What we are committed to at today\u2019s prices'}{' '}
+            · <Money amount={summary.total_monthly_reported} currency={currency} /> a month
           </span>
         </div>
 
@@ -175,7 +180,8 @@ export function SpendLead({
               <Money amount={summary.internal.annual_reported} currency={currency} />
               <span className="split-key-sub">
                 {summary.internal.product_count}{' '}
-                {summary.internal.product_count === 1 ? 'product' : 'products'} · licences only
+                {summary.internal.product_count === 1 ? 'product' : 'products'} ·{' '}
+                {hasUsage ? 'subscriptions and usage' : 'licences only'}
               </span>
             </dd>
           </div>
@@ -323,30 +329,76 @@ export function ProductsCard({ summary }: { summary: CeoSummary }) {
       {summary.products.length === 0 ? (
         <EmptyState title="No internal products yet" compact>
           Add one on the <Link to="/products">Our products</Link> screen, then attribute its
-          hosting, domain and API subscriptions to it.
+          subscriptions to it and record what it costs each month.
         </EmptyState>
       ) : (
         <div>
-          {summary.products.map((entry) => (
-            <div className="product-row" key={entry.product.id}>
-              <div style={{ minWidth: 0 }}>
-                <div className="product-name">
-                  <Link to={`/products/${entry.product.id}`}>{entry.product.name}</Link>
+          {summary.products.map((entry) => {
+            const hasUsage = entry.usage_monthly_reported !== null;
+            const fixedKnown = (entry.fixed_annual_reported ?? 0) > 0;
+            // Nothing recorded on either side. Showing 0.00 here would say the
+            // product is free, when the truth is that nobody has entered its cost.
+            const unknown = !hasUsage && !fixedKnown;
+            return (
+              <div className="product-row" key={entry.product.id}>
+                <div style={{ minWidth: 0 }}>
+                  <div className="product-name">
+                    <Link to={`/products/${entry.product.id}`}>{entry.product.name}</Link>
+                  </div>
+                  <div className="product-meta">
+                    {hasUsage ? (
+                      <>
+                        {/* A zero subscription part is noise, not information. */}
+                        {fixedKnown ? (
+                          <>
+                            <Money amount={entry.fixed_annual_reported} currency={currency} />{' '}
+                            subscriptions{' + '}
+                          </>
+                        ) : null}
+                        <Money amount={entry.usage_annual_reported} currency={currency} /> usage
+                        {entry.usage_months_counted > 0
+                          ? ` (${entry.usage_months_counted}-month average)`
+                          : ''}
+                      </>
+                    ) : (
+                      <>
+                        {entry.tool_count} {entry.tool_count === 1 ? 'subscription' : 'subscriptions'}
+                        {' · '}no usage costs entered
+                      </>
+                    )}
+                    {entry.product.owner_name ? ` · ${entry.product.owner_name}` : ''}
+                    {entry.product.status !== 'live' ? ` · ${entry.product.status}` : ''}
+                  </div>
+                  {entry.latest_month_missing ? (
+                    <div style={{ marginTop: 6 }}>
+                      <Link to={`/products/${entry.product.id}`}>
+                        <Badge tone="warning">
+                          {monthLabel(summary.latest_complete_month, true)} costs not entered
+                        </Badge>
+                      </Link>
+                    </div>
+                  ) : null}
                 </div>
-                <div className="product-meta">
-                  {entry.tool_count} {entry.tool_count === 1 ? 'subscription' : 'subscriptions'}
-                  {entry.product.owner_name ? ` · ${entry.product.owner_name}` : ''}
-                  {entry.product.status !== 'live' ? ` · ${entry.product.status}` : ''}
+                <div className="product-cost">
+                  {unknown ? (
+                    <>
+                      <div className="primary" style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
+                        Not known yet
+                      </div>
+                      <div className="secondary">no cost recorded</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="primary">
+                        <Money amount={entry.annual_reported} currency={currency} />
+                      </div>
+                      <div className="secondary">a year</div>
+                    </>
+                  )}
                 </div>
               </div>
-              <div className="product-cost">
-                <div className="primary">
-                  <Money amount={entry.annual_reported} currency={currency} />
-                </div>
-                <div className="secondary">a year</div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>
@@ -444,7 +496,9 @@ export function ProvenanceCard({ summary }: { summary: CeoSummary }) {
 
         <div className="rate-note">
           <span>
-            Running cost covers subscription and licence cash only. Staff time is not included.
+            Running cost covers subscription, licence and cloud cash only. Staff time is not
+            included. Cloud usage is entered by hand each month and averaged over the last three
+            complete months, so it is an estimate rather than a commitment.
           </span>
         </div>
 

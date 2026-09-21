@@ -158,15 +158,35 @@ keeps the app deployable to environments that do not allow outbound SMTP.
 
 ## Our own products
 
-Hosting, domains and APIs are things we pay a vendor for, so they are ordinary
-tools. What makes them different is that they exist to keep one of *our*
-products running — so an internal product is a bucket a tool can be attributed
-to, and its running cost is the roll-up of those tools.
+What it costs to run one of our own products has two parts, and they are kept
+apart because they behave differently.
 
-The consequence: a hosting renewal chases its owner through exactly the same
-reminder path as a Canva renewal, with no new alerting code. Running cost is
-subscription and licence cash only; there is nowhere to record staff time, on
-purpose.
+**Fixed subscriptions.** A domain, a hosting plan, a licence: things we pay a
+vendor a known price for. These are ordinary tools, attributed to the product,
+so they chase their owner through the same reminder path as a Canva renewal.
+
+**Usage costs.** Cloud spend such as AWS is different every month, so it is not a
+price times a billing cycle. It is entered as it happens, one line per product
+per month per provider (`TRA · Aug 2026 · AWS · $312.50`), on the product's own
+page. Entering the same month and provider again replaces the line, so
+correcting a figure is the same gesture as entering one.
+
+The dashboard adds the two: subscriptions at today's prices, plus usage at the
+average of the last three complete months. That average is labelled an estimate,
+not a commitment, and it is taken only over months that were actually entered:
+a month nobody typed is unknown, not zero, and averaging it in as zero would
+quietly understate the product's cost. A product whose last complete month is
+still missing is flagged on the dashboard, because manual entry only fails one
+way: by being forgotten while the figures keep looking current.
+
+Recorded costs also count towards "what we actually paid", so the AWS bill is in
+the history as well as the run rate. Do not also record the same AWS bill as a
+tool, or it will be counted twice.
+
+Amounts are entered in the currency of the bill, converted at that month's
+exchange rate, and a product with cost history cannot be deleted: set it to
+Retired instead, since that history is the record of what it cost. There is no
+staff-time cost anywhere, on purpose.
 
 ## Exchange rates
 

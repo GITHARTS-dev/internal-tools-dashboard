@@ -9,6 +9,7 @@
 
 import { z } from 'zod';
 import { isIsoDate } from './dates';
+import { isYearMonth } from './fx';
 
 export const TOOL_STATUSES = ['active', 'trial', 'cancelled', 'expired'] as const;
 export const BILLING_CYCLES = ['monthly', 'quarterly', 'annual', 'one_time', 'custom'] as const;
@@ -136,6 +137,31 @@ export const internalProductCreateSchema = z.object({
 
 export const internalProductUpdateSchema = internalProductCreateSchema.partial();
 
+/**
+ * One month of one provider's cost for a product.
+ *
+ * Entering the same month and provider again replaces the earlier figure, so
+ * this is an upsert payload rather than a create-only one. Amount is minor
+ * units: the form converts, the API never sees a float.
+ */
+export const productCostSchema = z.object({
+  month: z
+    .string()
+    .trim()
+    .refine(isYearMonth, 'Use a month such as 2026-08'),
+  provider: z.string().trim().min(1, 'Say which provider this is, such as AWS').max(60),
+  amount: z.coerce.number().int('Enter a whole number of minor units').min(0, 'A cost cannot be negative'),
+  currency: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z]{3}$/, 'Use a 3-letter currency code such as USD')
+    // Cloud bills are almost always in dollars, so that is what an unset
+    // currency means here, unlike a tool where the company default applies.
+    .default('USD'),
+  note: optText(300),
+});
+
 export const paymentCreateSchema = z.object({
   tool_id: z.string().trim().min(1),
   period_start: optDate(),
@@ -176,6 +202,7 @@ export const documentCreateSchema = z.object({
 
 export const settingsUpdateSchema = z.record(z.string(), z.string());
 
+export type ProductCostInput = z.infer<typeof productCostSchema>;
 export type InternalProductCreateInput = z.infer<typeof internalProductCreateSchema>;
 export type InternalProductUpdateInput = z.infer<typeof internalProductUpdateSchema>;
 export type ToolCreateInput = z.infer<typeof toolCreateSchema>;

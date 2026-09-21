@@ -15,6 +15,7 @@ import { availableMonths, saveRates } from '../repo/fxRates';
 import { getSettings } from '../repo/settings';
 import { listAllTools } from '../repo/tools';
 import { listPayments } from '../repo/payments';
+import { distinctCostCurrencies } from '../repo/productCosts';
 
 /** How far back a routine refresh reaches. Older months are settled. */
 const TRAILING_MONTHS = 3;
@@ -32,10 +33,17 @@ export interface RefreshResult {
 }
 
 export async function currenciesInUse(db: Db, reporting: string): Promise<string[]> {
-  const [tools, payments] = await Promise.all([listAllTools(db), listPayments(db)]);
+  const [tools, payments, costCurrencies] = await Promise.all([
+    listAllTools(db),
+    listPayments(db),
+    distinctCostCurrencies(db),
+  ]);
   const set = new Set<string>([reporting.toUpperCase()]);
   for (const tool of tools) set.add(tool.currency.toUpperCase());
   for (const payment of payments) set.add(payment.currency.toUpperCase());
+  // A currency that only appears on a recorded product cost still needs a rate,
+  // or that cost would sit in the ledger unconvertible and be left out of totals.
+  for (const currency of costCurrencies) set.add(currency);
   return [...set].sort();
 }
 

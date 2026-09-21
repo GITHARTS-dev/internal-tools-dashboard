@@ -1,22 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { useAsync } from '../lib/hooks';
 import { Badge, EmptyState, Loading, MoneyTotals, StatusBadge, useToast } from '../components/ui';
 import { IconArrowLeft, IconEdit } from '../components/icons';
+import MonthlyCosts from '../components/MonthlyCosts';
 import ProductForm, {
   PRODUCT_STATUS_LABEL,
   valuesFromProduct,
 } from '../components/ProductForm';
-import { annualisedCost, monthlyCost } from '../../shared/money';
+import { formatMoney, monthlyCost } from '../../shared/money';
 import { formatDate } from '../../shared/dates';
 import type { InternalProduct, InternalProductStatus, Tool } from '../../shared/types';
 
 /**
- * One internal product and the subscriptions that make up its running cost.
+ * One internal product: its fixed subscriptions, and what it actually cost each
+ * month.
  *
- * Totals stay per-currency here on purpose. This screen is the admin's working
- * view, where seeing "$45/mo + ₹2,000/mo" is more useful than one converted
- * figure; the single-currency roll-up lives on the dashboard.
+ * Running cost has two parts and this page keeps them apart. The subscriptions
+ * attributed to the product are fixed prices, shown per-currency here on
+ * purpose: this is the admin's working view, where "$45/mo + ₹2,000/mo" is more
+ * useful than one converted figure. The usage-based cloud costs are recorded per
+ * month and averaged; the single-currency roll-up of both lives on the dashboard.
  *
  * Everything the edit form can set is shown here when it has a value, so what
  * you type and what you read back are the same set of facts.
@@ -36,6 +41,7 @@ export default function ProductDetail() {
   const [tools, setTools] = useState<Tool[]>([]);
   const [missing, setMissing] = useState(false);
   const [editing, setEditing] = useState(false);
+  const costs = useAsync(() => api.productCosts(id), [id]);
 
   const load = useCallback(() => {
     api
@@ -83,14 +89,12 @@ export default function ProductDetail() {
 
   const live = tools.filter((t) => t.status === 'active' || t.status === 'trial');
   const monthly: Record<string, number> = {};
-  const annual: Record<string, number> = {};
   for (const tool of live) {
     const m = monthlyCost(tool.cost_amount, tool.billing_cycle);
-    const a = annualisedCost(tool.cost_amount, tool.billing_cycle);
     const cur = tool.currency.toUpperCase();
     if (m) monthly[cur] = (monthly[cur] ?? 0) + m;
-    if (a) annual[cur] = (annual[cur] ?? 0) + a;
   }
+  const usage = costs.data?.usage;
 
   return (
     <>
@@ -144,15 +148,29 @@ export default function ProductDetail() {
 
             <dl className="detail-grid">
               <div className="detail-item">
-                <dt>Monthly running cost</dt>
+                <dt>Subscriptions a month</dt>
                 <dd>
                   <MoneyTotals totals={monthly} />
+                  <div className="cell-sub">fixed, from attributed tools</div>
                 </dd>
               </div>
               <div className="detail-item">
-                <dt>Annual running cost</dt>
+                <dt>Usage a month</dt>
                 <dd>
-                  <MoneyTotals totals={annual} />
+                  {usage && usage.average_reported !== null && costs.data ? (
+                    <>
+                      {formatMoney(usage.average_reported, costs.data.reporting_currency)}
+                      <div className="cell-sub">
+                        average of {usage.months_counted}{' '}
+                        {usage.months_counted === 1 ? 'month' : 'months'} entered
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {'\u2014'}
+                      <div className="cell-sub">no recent months entered</div>
+                    </>
+                  )}
                 </dd>
               </div>
               <div className="detail-item">
@@ -190,6 +208,21 @@ export default function ProductDetail() {
         )}
       </div>
 
+      {costs.data ? (
+        <MonthlyCosts
+          productId={id}
+          productStatus={product.status}
+          data={costs.data}
+          onChanged={costs.reload}
+        />
+      ) : costs.error ? (
+        <div className="card">
+          <EmptyState title="Could not load the monthly costs" compact>
+            {costs.error}
+          </EmptyState>
+        </div>
+      ) : null}
+
       <div className="card">
         <div className="card-head">
           <h2>What it runs on</h2>
@@ -198,7 +231,9 @@ export default function ProductDetail() {
           </span>
         </div>
         <div className="card-sub">
-          Attribute a subscription to this product by editing that tool and choosing this product.
+          The fixed subscriptions that keep it running, such as a hosting plan, a domain or
+          licences. Attribute one by editing that tool and choosing this product. Bills that
+          change with usage belong in Monthly costs above, not here.
         </div>
 
         {tools.length === 0 ? (
@@ -251,7 +286,9 @@ export default function ProductDetail() {
         </div>
         <div className="card-sub">
           The subscriptions attributed to it are kept, because we still pay for them. They simply
-          stop being counted against this product.
+          stop being counted against this product. A product with monthly costs recorded cannot be
+          removed, because that history is the record of what it cost: set its status to Retired
+          instead.
         </div>
         <button type="button" className="btn danger" onClick={remove}>
           Remove {product.name}

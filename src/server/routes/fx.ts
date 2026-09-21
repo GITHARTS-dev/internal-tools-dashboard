@@ -3,30 +3,13 @@ import type { Env } from '../context';
 import { actor, db, zodErrorResponse } from '../context';
 import { isYearMonth, monthOf, addMonthsToYearMonth, parseRate } from '../../shared/fx';
 import { fetchEcbRates, FxFetchError } from '../fx/ecb';
+import { currenciesInUse } from '../fx/refresh';
 import { availableMonths, fxStatus, listRates, saveRates } from '../repo/fxRates';
 import { getSettings } from '../repo/settings';
-import { listAllTools } from '../repo/tools';
-import { listPayments } from '../repo/payments';
 import { recordAudit } from '../repo/audit';
 import { todayInTimezone } from '../../shared/dates';
 
 export const fxRoutes = new Hono<{ Bindings: Env }>();
-
-/**
- * Which currencies this company actually uses.
- *
- * Derived from the data rather than configured, so adding a tool priced in a
- * new currency makes the next refresh fetch that currency without anyone
- * remembering to update a list.
- */
-async function currenciesInUse(dbi: ReturnType<typeof db>, reporting: string): Promise<string[]> {
-  const tools = await listAllTools(dbi);
-  const payments = await listPayments(dbi);
-  const set = new Set<string>([reporting.toUpperCase()]);
-  for (const tool of tools) set.add(tool.currency.toUpperCase());
-  for (const payment of payments) set.add(payment.currency.toUpperCase());
-  return [...set].sort();
-}
 
 fxRoutes.get('/fx/status', async (c) => {
   const settings = await getSettings(db(c));

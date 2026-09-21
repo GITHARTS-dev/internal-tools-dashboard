@@ -84,13 +84,22 @@ export default function App() {
       <div className="app">
         <aside className="sidebar">
           <div className="brand">
-            <span className="brand-mark" aria-hidden="true">
-              TS
-            </span>
-            <span>
-              <div className="brand-text">Tools &amp; Subs</div>
-              <div className="brand-sub">Internal ledger</div>
-            </span>
+            {/* Both marks ship; CSS shows the one that suits the surface. */}
+            <img
+              className="brand-logo on-light"
+              src="/harts-logo-on-light.png"
+              alt="HARTS"
+              width={109}
+              height={26}
+            />
+            <img
+              className="brand-logo on-dark"
+              src="/harts-logo-on-dark.png"
+              alt="HARTS"
+              width={109}
+              height={26}
+            />
+            <div className="brand-sub">Tools &amp; subscriptions</div>
           </div>
 
           <nav className="nav" aria-label="Main">

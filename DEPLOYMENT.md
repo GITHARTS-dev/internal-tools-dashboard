@@ -176,12 +176,13 @@ Two things are worth verifying deliberately:
 2. **Try an account outside your tenant**, if you have one. It should be
    refused. If it is let in, the app registration is multi-tenant.
 
-Seed the exchange rates once (they are refreshed daily after that):
+Seed the exchange rates once, signed in as yourself: **Settings → Exchange rates
+→ Fetch rates now**. They are refreshed daily after that.
 
-```bash
-curl -X POST "https://<your-site>.azurestaticapps.net/api/fx/refresh?from=2024-01" \
-     -H "x-reminder-token: <REMINDER_TOKEN>"
-```
+(You cannot `curl` this one. `/api/fx/refresh` sits behind the Entra sign-in like
+everything else; the reminder token only opens `/api/reminders/run`. That route
+also fetches a 24-month backfill on its first run when no rates are stored, so
+running the reminder workflow once does the same job.)
 
 ---
 
@@ -325,6 +326,6 @@ history, so the common "undo" is a status change, not a restore.
 - [ ] Redirect URI added to the app registration
 - [ ] **Private window redirects to sign-in** — not straight into the app
 - [ ] An account outside the tenant is refused
-- [ ] `POST /api/fx/refresh?from=2024-01` run once
+- [ ] Settings → Exchange rates → **Fetch rates now** pressed once
 - [ ] Teams webhook set, **Send test** produces a card
 - [ ] "Send due reminders" workflow run manually, card arrives

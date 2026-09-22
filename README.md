@@ -145,7 +145,7 @@ Nothing secret belongs in a committed file.
 | `DATABASE_URL` | Supabase connection string. Unset locally, which selects SQLite. |
 | `REMINDER_TOKEN` | Shared secret for `POST /api/reminders/run`, the one endpoint a machine calls. Inert when unset. |
 | `APP_ENV` | `production` disables the demo-data controls. |
-| `FEATURE_DOCUMENTS` | `true` enables contract/invoice records. Off by default, pending a decision on whether invoices are stored at all or only their amounts. |
+| `FEATURE_DOCUMENTS` | `true` enables contract/invoice records. Off by default -- invoices are not tracked for now; a payment's invoice reference and URL are plain optional text regardless of this flag. |
 | `TEAMS_WEBHOOK_URL` | Teams incoming webhook (can also be set in Settings). |
 | `EMAIL_PROVIDER` | `graph`, `resend`, or unset. Unset means email stays inert. |
 | `MS_TENANT_ID` / `MS_CLIENT_ID` / `MS_CLIENT_SECRET` | Microsoft Graph credentials. |

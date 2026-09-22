@@ -185,7 +185,6 @@ export default function Payments() {
                   <th className="num" scope="col">Amount</th>
                   <th scope="col">Status</th>
                   <th scope="col">Paid on</th>
-                  <th scope="col">Invoice</th>
                   <th scope="col" />
                 </tr>
               </thead>
@@ -238,7 +237,6 @@ export default function Payments() {
                           <span className="cell-sub">—</span>
                         )}
                       </td>
-                      <td className="cell-sub">{payment.invoice_ref ?? '—'}</td>
                       <td className="num">
                         {payment.status === 'due' ? (
                           <button

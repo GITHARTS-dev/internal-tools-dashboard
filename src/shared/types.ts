@@ -42,6 +42,9 @@ export interface Tool {
   internal_product_id: string | null;
   created_at: string;
   updated_at: string;
+  /** Set when this tool is in the trash. It is excluded from every list until purged or restored. */
+  deleted_at: string | null;
+  deleted_by: string | null;
 }
 
 export type InternalProductStatus = 'live' | 'building' | 'retired';

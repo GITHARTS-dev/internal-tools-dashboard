@@ -3,7 +3,7 @@ import { runReminders, weekKey } from '../src/server/reminders';
 import { consoleChannel } from '../src/server/notify/console';
 import { buildTeamsCard } from '../src/server/notify/teams';
 import { listNotifications } from '../src/server/repo/notifications';
-import { createTool } from '../src/server/repo/tools';
+import { createTool, listTrash, trashTool } from '../src/server/repo/tools';
 import { createPayment } from '../src/server/repo/payments';
 import { updateSettings } from '../src/server/repo/settings';
 import type { Channel, NotificationPayload } from '../src/server/notify/types';
@@ -42,6 +42,18 @@ beforeEach(async () => {
   ({ db } = testDb());
   await updateSettings(db, { timezone: 'Asia/Kolkata' });
 });
+
+function toolInput(name = 'Some tool') {
+  return {
+    name,
+    category: 'Other',
+    status: 'active',
+    billing_cycle: 'monthly',
+    currency: 'INR',
+    auto_renew: true,
+    cancellation_notice_days: 0,
+  } as never;
+}
 
 async function seedOverduePayment() {
   const tool = await createTool(db, {
@@ -95,6 +107,37 @@ describe('dry run', () => {
       channels: [recordingChannel()],
     });
     expect(quiet.alerts.filter((a) => a.rule === 'payment_overdue')).toHaveLength(0);
+  });
+
+  it('leaves the trash alone: previewing must not change anything', async () => {
+    const tool = await createTool(db, toolInput());
+    await trashTool(db, tool.id, 'test');
+    await db.prepare('UPDATE tools SET deleted_at = ? WHERE id = ?').bind('2020-01-01T00:00:00.000Z', tool.id).run();
+
+    await runReminders(db, env, { dryRun: true, today: '2026-09-18', channels: [recordingChannel()] });
+
+    expect(await listTrash(db)).toHaveLength(1);
+  });
+});
+
+describe('the daily run and the trash', () => {
+  it('empties out anything that has sat in the trash past the retention window', async () => {
+    const tool = await createTool(db, toolInput());
+    await trashTool(db, tool.id, 'test');
+    await db.prepare('UPDATE tools SET deleted_at = ? WHERE id = ?').bind('2020-01-01T00:00:00.000Z', tool.id).run();
+
+    await runReminders(db, env, { today: '2026-09-18', channels: [recordingChannel()] });
+
+    expect(await listTrash(db)).toHaveLength(0);
+  });
+
+  it('does not touch a tool still inside the retention window', async () => {
+    const tool = await createTool(db, toolInput());
+    await trashTool(db, tool.id, 'test');
+
+    await runReminders(db, env, { today: '2026-09-18', channels: [recordingChannel()] });
+
+    expect(await listTrash(db)).toHaveLength(1);
   });
 });
 

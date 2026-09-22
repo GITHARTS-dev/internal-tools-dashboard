@@ -62,6 +62,15 @@ export default function ToolDetail() {
     }
   }
 
+  function deleteTool() {
+    const ok = window.confirm(
+      `Delete ${tool.name}? It moves to Trash, kept for 30 days with the option to restore it, before it is gone for good.`,
+    );
+    if (ok) act(() => api.deleteTool(tool.id), `${tool.name} moved to Trash.`);
+  }
+
+  const trashed = tool.deleted_at !== null;
+
   return (
     <>
       <div className="crumb">
@@ -71,41 +80,65 @@ export default function ToolDetail() {
       <div className="toolbar">
         <h1 style={{ fontSize: 20 }}>{tool.name}</h1>
         <StatusBadge status={tool.status} />
+        {trashed ? <Badge tone="critical">In trash</Badge> : null}
         <span className="spacer" />
-        <Link className="btn" to={`/tools/${tool.id}/edit`}>
-          Edit
-        </Link>
-        <button
-          type="button"
-          className="btn"
-          disabled={busy || !tool.renewal_date}
-          title={tool.renewal_date ? 'Create the next payment from this tool\'s cycle' : 'Set a renewal date first'}
-          onClick={() => act(() => api.schedulePayment(tool.id), 'Next payment scheduled.')}
-        >
-          Schedule next payment
-        </button>
-        {tool.status === 'cancelled' || tool.status === 'expired' ? (
+        {trashed ? (
           <button
             type="button"
-            className="btn"
+            className="btn primary"
             disabled={busy}
-            onClick={() => act(() => api.restoreTool(tool.id), `${tool.name} restored to active.`)}
+            onClick={() => act(() => api.undeleteTool(tool.id), `${tool.name} restored from Trash.`)}
           >
-            Restore
+            Restore from Trash
           </button>
         ) : (
-          <button
-            type="button"
-            className="btn danger"
-            disabled={busy}
-            onClick={() => act(() => api.archiveTool(tool.id), `${tool.name} marked cancelled.`)}
-          >
-            Mark cancelled
-          </button>
+          <>
+            <Link className="btn" to={`/tools/${tool.id}/edit`}>
+              Edit
+            </Link>
+            <button
+              type="button"
+              className="btn"
+              disabled={busy || !tool.renewal_date}
+              title={tool.renewal_date ? 'Create the next payment from this tool\'s cycle' : 'Set a renewal date first'}
+              onClick={() => act(() => api.schedulePayment(tool.id), 'Next payment scheduled.')}
+            >
+              Schedule next payment
+            </button>
+            {tool.status === 'cancelled' || tool.status === 'expired' ? (
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => act(() => api.restoreTool(tool.id), `${tool.name} restored to active.`)}
+              >
+                Restore
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => act(() => api.archiveTool(tool.id), `${tool.name} marked cancelled.`)}
+              >
+                Mark cancelled
+              </button>
+            )}
+            <button type="button" className="btn danger" disabled={busy} onClick={deleteTool}>
+              Delete
+            </button>
+          </>
         )}
       </div>
 
-      {tool.status === 'cancelled' ? (
+      {trashed ? (
+        <Banner tone="critical">
+          In Trash{tool.deleted_by ? `, deleted by ${tool.deleted_by}` : ''} on{' '}
+          {formatDate((tool.deleted_at ?? '').slice(0, 10))}. Restore it, or leave it — it is
+          purged for good 30 days after it was deleted. The payment history below is untouched
+          either way.
+        </Banner>
+      ) : tool.status === 'cancelled' ? (
         <Banner tone="info">
           Cancelled on {formatDate(tool.cancelled_on)}. Nothing has been deleted — the payment
           history below is kept so past spend stays answerable.

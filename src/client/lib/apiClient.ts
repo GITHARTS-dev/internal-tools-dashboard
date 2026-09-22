@@ -178,6 +178,14 @@ export const api = {
   restoreTool: (id: string) =>
     request<{ tool: Tool }>(`/tools/${id}/restore`, { method: 'POST', ...json({}) }),
 
+  // Deleting moves a tool to the trash rather than removing it outright; it
+  // stays there, restorable, until the retention window purges it for real.
+  deleteTool: (id: string) => request<{ ok: true }>(`/tools/${id}`, { method: 'DELETE' }),
+  undeleteTool: (id: string) =>
+    request<{ tool: Tool }>(`/tools/${id}/undelete`, { method: 'POST', ...json({}) }),
+  trash: () => request<{ tools: Tool[]; retention_days: number }>('/tools/trash'),
+  purgeTool: (id: string) => request<{ ok: true }>(`/tools/trash/${id}`, { method: 'DELETE' }),
+
   schedulePayment: (toolId: string, body: unknown = {}) =>
     request<{ payment: Payment }>(`/tools/${toolId}/payments`, { method: 'POST', ...json(body) }),
 

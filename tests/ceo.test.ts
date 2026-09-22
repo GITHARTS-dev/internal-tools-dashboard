@@ -25,7 +25,7 @@ function tool(over: Partial<Tool> = {}): Tool {
     cancellation_notice_days: 0, account_ref: null, billing_email: null,
     payment_method: null, vendor_url: null, notes: null,
     started_on: null, cancelled_on: null, internal_product_id: null,
-    created_at: '', updated_at: '',
+    created_at: '', updated_at: '', deleted_at: null, deleted_by: null,
     ...over,
   };
 }

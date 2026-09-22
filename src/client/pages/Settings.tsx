@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, ApiError, type ImportResult, type ReminderRunResponse } from '../lib/api';
 import { useAsync } from '../lib/hooks';
 import { Badge, Banner, EmptyState, Loading, useToast } from '../components/ui';
@@ -295,8 +296,101 @@ export default function Settings() {
 
       <DryRunPanel />
       <ImportPanel onDone={reload} />
+      <TrashPanel />
       <ChangeLogPanel />
     </>
+  );
+}
+
+/**
+ * Deleted tools, restorable until the retention window purges them for good.
+ *
+ * Deleting from the tool page never removes a row outright -- it lands here
+ * instead, so a mistaken click is one button away from undone rather than a
+ * support request.
+ */
+function TrashPanel() {
+  const toast = useToast();
+  const { data, error, loading, reload } = useAsync(() => api.trash(), []);
+  const [busy, setBusy] = useState<string | null>(null);
+  const entries = data?.tools ?? [];
+
+  async function restore(tool: { id: string; name: string }) {
+    setBusy(tool.id);
+    try {
+      await api.undeleteTool(tool.id);
+      toast(`${tool.name} restored from Trash.`);
+      reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'That did not work.', 'error');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function purgeNow(tool: { id: string; name: string }) {
+    const ok = window.confirm(`Permanently delete ${tool.name}? This cannot be undone.`);
+    if (!ok) return;
+    setBusy(tool.id);
+    try {
+      await api.purgeTool(tool.id);
+      toast(`${tool.name} permanently deleted.`);
+      reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'That did not work.', 'error');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Trash</h2>
+        <span className="hint">
+          {data ? `kept ${data.retention_days} days, then removed for good` : ''}
+        </span>
+      </div>
+      {loading && !data ? (
+        <Loading rows={2} />
+      ) : error ? (
+        <Banner tone="warning">{error}</Banner>
+      ) : entries.length === 0 ? (
+        <EmptyState title="Nothing in the trash" compact />
+      ) : (
+        <div>
+          {entries.map((tool) => (
+            <div className="audit-item" key={tool.id}>
+              <span className="audit-when">{formatDate((tool.deleted_at ?? '').slice(0, 10))}</span>
+              <span className="audit-change" style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <Link to={`/tools/${tool.id}`}>{tool.name}</Link>
+                  {tool.deleted_by ? (
+                    <span style={{ color: 'var(--text-muted)' }}> · deleted by {tool.deleted_by}</span>
+                  ) : null}
+                </span>
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={busy === tool.id}
+                  onClick={() => restore(tool)}
+                >
+                  Restore
+                </button>
+                <button
+                  type="button"
+                  className="btn sm danger"
+                  disabled={busy === tool.id}
+                  onClick={() => purgeNow(tool)}
+                >
+                  Delete forever
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

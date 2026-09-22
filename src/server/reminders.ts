@@ -3,7 +3,7 @@ import { isoWeekday, todayInTimezone } from '../shared/dates';
 import type { Alert, AppSettings, IsoDate } from '../shared/types';
 import type { Db } from './repo/db';
 import { getSettings } from './repo/settings';
-import { listAllTools } from './repo/tools';
+import { listAllTools, purgeOldTrash } from './repo/tools';
 import { listPayments } from './repo/payments';
 import { listInternalProducts } from './repo/internalProducts';
 import { listAllProductCosts } from './repo/productCosts';
@@ -80,6 +80,11 @@ export async function runReminders(
   const today = options.today ?? todayInTimezone(settings.timezone, options.now);
   const channels = options.channels ?? DEFAULT_CHANNELS;
   const dryRun = options.dryRun ?? false;
+
+  // Piggybacks on the one thing actually scheduled to run daily, so the trash
+  // empties itself without needing infrastructure of its own. A dry run
+  // previews what would be sent and must not change anything, this included.
+  if (!dryRun) await purgeOldTrash(db);
 
   const tools = await listAllTools(db);
   const payments = await listPayments(db);

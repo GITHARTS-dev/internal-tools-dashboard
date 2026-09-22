@@ -26,12 +26,17 @@ export interface ToolFilters {
   includeArchived?: boolean;
   /** Tools attributed to one internal product; 'none' means unattributed. */
   internalProductId?: string;
+  /** Default false: a trashed tool is excluded from every ordinary list. Only the Trash screen sets this. */
+  includeDeleted?: boolean;
 }
 
 export async function listTools(db: Db, filters: ToolFilters = {}): Promise<Tool[]> {
   const where: string[] = [];
   const params: unknown[] = [];
 
+  if (!filters.includeDeleted) {
+    where.push('deleted_at IS NULL');
+  }
   if (filters.status && filters.status.length > 0) {
     where.push(`status IN (${filters.status.map(() => '?').join(', ')})`);
     params.push(...filters.status);
@@ -133,9 +138,60 @@ export async function restoreTool(db: Db, id: string): Promise<Tool | null> {
   return getTool(db, id);
 }
 
-/** Hard delete. Reserved for genuine mistakes; the UI archives instead. */
-export async function deleteTool(db: Db, id: string): Promise<void> {
-  await db.prepare('DELETE FROM tools WHERE id = ?').bind(id).run();
+/**
+ * Trash a tool: it drops out of every ordinary list immediately, but the row
+ * and its payments are untouched, so it is one call away from coming back.
+ */
+export async function trashTool(db: Db, id: string, deletedBy: string): Promise<Tool | null> {
+  await db
+    .prepare('UPDATE tools SET deleted_at = ?, deleted_by = ?, updated_at = ? WHERE id = ?')
+    .bind(nowIso(), deletedBy, nowIso(), id)
+    .run();
+  return getTool(db, id);
+}
+
+export async function untrashTool(db: Db, id: string): Promise<Tool | null> {
+  await db
+    .prepare('UPDATE tools SET deleted_at = NULL, deleted_by = NULL, updated_at = ? WHERE id = ?')
+    .bind(nowIso(), id)
+    .run();
+  return getTool(db, id);
+}
+
+export async function listTrash(db: Db): Promise<Tool[]> {
+  const { results } = await db
+    .prepare('SELECT * FROM tools WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC')
+    .all<ToolRow>();
+  return results.map(mapTool);
+}
+
+/**
+ * Hard delete, for a trashed row whose retention window has passed, or for
+ * someone who wants a specific row gone right now rather than waiting for it.
+ * Not reachable from the ordinary tool routes -- only from the trash it sat in.
+ */
+export async function purgeTool(db: Db, id: string): Promise<void> {
+  await db.prepare('DELETE FROM tools WHERE id = ? AND deleted_at IS NOT NULL').bind(id).run();
+}
+
+/** How long a deleted tool sits in the trash before it is purged for real. */
+export const TRASH_RETENTION_DAYS = 30;
+
+/** Empties out anything that has sat in the trash longer than the retention window. */
+export async function purgeOldTrash(db: Db, olderThanDays: number = TRASH_RETENTION_DAYS): Promise<number> {
+  const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000).toISOString();
+  // `run()`'s return shape is not standard across engines, so the count comes
+  // from counting the rows first rather than trusting what the DELETE reports.
+  const { results } = await db
+    .prepare('SELECT id FROM tools WHERE deleted_at IS NOT NULL AND deleted_at < ?')
+    .bind(cutoff)
+    .all<{ id: string }>();
+  if (results.length === 0) return 0;
+  await db
+    .prepare('DELETE FROM tools WHERE deleted_at IS NOT NULL AND deleted_at < ?')
+    .bind(cutoff)
+    .run();
+  return results.length;
 }
 
 /*

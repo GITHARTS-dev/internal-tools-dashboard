@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { currencySymbol, decimalPlaces, formatMoney } from '../../shared/money';
 import { formatDate } from '../../shared/dates';
 
@@ -66,20 +67,31 @@ export function useTooltip() {
   }, []);
   const hide = useCallback(() => setTip(null), []);
 
-  const node = tip ? (
-    <div
-      className="tooltip"
-      role="tooltip"
-      style={{
-        // Nudged away from the cursor, and flipped near the right edge so the
-        // tooltip never falls off screen.
-        left: Math.min(tip.x + 14, window.innerWidth - 270),
-        top: Math.max(tip.y - 12, 8),
-      }}
-    >
-      {tip.content}
-    </div>
-  ) : null;
+  // Portaled to the document body. Every chart lives inside a glass panel,
+  // and a `backdrop-filter` on an ancestor gives `position: fixed` a new
+  // containing block -- the panel, not the viewport -- so a tooltip left in
+  // place would land wherever the panel happens to sit rather than at the
+  // cursor. Escaping the panel is what makes `fixed` mean the viewport again.
+  const node = tip
+    ? createPortal(
+        <div
+          className="tooltip"
+          role="tooltip"
+          style={{
+            // Flipped near the right edge so it never falls off screen. Anchored
+            // above the cursor by default -- below only when there is not enough
+            // room above -- so it never drapes over whatever sits under the point
+            // (a chart low in a card would otherwise hide the section below it).
+            left: Math.min(tip.x + 14, window.innerWidth - 270),
+            top: tip.y < 140 ? tip.y + 16 : Math.max(tip.y - 14, 8),
+            transform: tip.y < 140 ? undefined : 'translateY(-100%)',
+          }}
+        >
+          {tip.content}
+        </div>,
+        document.body,
+      )
+    : null;
 
   return { show, hide, node };
 }

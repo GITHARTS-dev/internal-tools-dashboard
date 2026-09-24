@@ -6,12 +6,17 @@ import { actor, db, featureDocuments, patchFrom, zodErrorResponse } from '../con
 import {
   archiveTool,
   createTool,
-  deleteTool,
   distinctCategories,
   distinctOwners,
   getTool,
   listTools,
+  listTrash,
+  purgeOldTrash,
+  purgeTool,
   restoreTool,
+  trashTool,
+  TRASH_RETENTION_DAYS,
+  untrashTool,
   updateTool,
 } from '../repo/tools';
 import { createPayment, listPayments } from '../repo/payments';
@@ -42,6 +47,17 @@ toolsRoutes.get('/options', async (c) => {
     distinctOwners(db(c)),
   ]);
   return c.json({ categories, owners });
+});
+
+/**
+ * Deleted tools, most recent first. A row sits here until someone restores it
+ * or the retention window passes -- swept on every visit here, so trash never
+ * needs its own scheduled job to stay tidy.
+ */
+toolsRoutes.get('/trash', async (c) => {
+  await purgeOldTrash(db(c), TRASH_RETENTION_DAYS);
+  const tools = await listTrash(db(c));
+  return c.json({ tools, retention_days: TRASH_RETENTION_DAYS });
 });
 
 toolsRoutes.post('/', async (c) => {
@@ -141,12 +157,51 @@ toolsRoutes.post('/:id/restore', async (c) => {
   return c.json({ tool });
 });
 
+/**
+ * Deletes a tool into the trash: it disappears from every screen at once, but
+ * the row and its payment history are untouched, so this is not the point of
+ * no return -- `POST /:id/undelete` is, until the retention window passes.
+ */
 toolsRoutes.delete('/:id', async (c) => {
   const id = c.req.param('id');
   const tool = await getTool(db(c), id);
   if (!tool) return c.json({ error: 'not_found', message: 'No such tool.' }, 404);
+  if (tool.deleted_at) return c.json({ error: 'not_found', message: 'No such tool.' }, 404);
 
-  await deleteTool(db(c), id);
+  await trashTool(db(c), id, actor(c));
+  await recordAudit(db(c), {
+    entity: 'tool',
+    entity_id: id,
+    action: 'delete',
+    actor: actor(c),
+    summary: `Moved ${tool.name} to Trash`,
+  });
+  return c.json({ ok: true });
+});
+
+toolsRoutes.post('/:id/undelete', async (c) => {
+  const id = c.req.param('id');
+  const tool = await getTool(db(c), id);
+  if (!tool || !tool.deleted_at) return c.json({ error: 'not_found', message: 'No such tool.' }, 404);
+
+  const restored = await untrashTool(db(c), id);
+  await recordAudit(db(c), {
+    entity: 'tool',
+    entity_id: id,
+    action: 'restore',
+    actor: actor(c),
+    summary: `Restored ${tool.name} from Trash`,
+  });
+  return c.json({ tool: restored });
+});
+
+/** Skips the retention window for one row -- for someone who wants it gone now, not in 30 days. */
+toolsRoutes.delete('/trash/:id', async (c) => {
+  const id = c.req.param('id');
+  const tool = await getTool(db(c), id);
+  if (!tool || !tool.deleted_at) return c.json({ error: 'not_found', message: 'No such tool.' }, 404);
+
+  await purgeTool(db(c), id);
   await recordAudit(db(c), {
     entity: 'tool',
     entity_id: id,

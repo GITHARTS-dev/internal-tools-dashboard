@@ -11,9 +11,20 @@ export default defineConfig({
     },
   },
   build: { outDir: 'dist/client', emptyOutDir: true },
+  // By default Vite crawls every .html file under the root to find dependencies,
+  // which would walk into the reference copy of the company dashboard sitting
+  // inside this folder. Point it at the one real entry.
+  optimizeDeps: { entries: ['index.html'] },
   server: {
     port: 5173,
-    // The Worker (API) runs separately under `wrangler dev` on 8787.
-    proxy: { '/api': { target: 'http://127.0.0.1:8787', changeOrigin: true } },
+    // Never watch the reference copy. It carries its own node_modules and .git,
+    // and a file in it being locked or rewritten (OneDrive, an editor, a git
+    // operation) throws EBUSY inside Vite's watcher and takes the whole dev
+    // server down with it -- which is exactly what happened.
+    watch: { ignored: ['**/HARTS-internal-tools-dashboard/**'] },
+    // The API (src/server/dev.ts) runs separately on 8788. Not 8787: that is where
+    // `wrangler dev` puts a Cloudflare Worker, and a second project's Worker
+    // answering our /api calls looks like a broken API.
+    proxy: { '/api': { target: 'http://127.0.0.1:8788', changeOrigin: true } },
   },
 });

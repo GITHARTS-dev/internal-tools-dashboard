@@ -9,6 +9,7 @@ const RULE_HEADINGS: Record<string, string> = {
   renewal_upcoming: 'Upcoming renewals',
   seats_underused: 'Unused seats',
   missing_data: 'Records needing details',
+  costs_missing: 'Monthly costs to enter',
 };
 
 /** Order the sections by how much they cost to ignore. */
@@ -18,6 +19,7 @@ const RULE_ORDER = [
   'payment_due_soon',
   'renewal_upcoming',
   'missing_data',
+  'costs_missing',
   'seats_underused',
 ] as const;
 

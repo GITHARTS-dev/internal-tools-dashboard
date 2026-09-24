@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { api, testDb, testEnv, toolPayload } from './db-helper';
+import { purgeOldTrash } from '../src/server/repo/tools';
 import type { Db } from '../src/server/repo/db';
 
 let db: Db;
@@ -181,6 +182,88 @@ describe('archiving', () => {
 
     expect(restored.json.tool.status).toBe('active');
     expect(restored.json.tool.cancelled_on).toBeNull();
+  });
+});
+
+describe('trash', () => {
+  it('deletes into the trash rather than removing the row', async () => {
+    const tool = await createTool();
+    await api(env, 'POST', `/api/tools/${tool.id}/payments`, { due_date: '2026-09-01', amount: 1499000 });
+
+    const deleted = await api(env, 'DELETE', `/api/tools/${tool.id}`);
+    expect(deleted.status).toBe(200);
+
+    // Gone from the ordinary list, everywhere it is drawn from...
+    expect((await api(env, 'GET', '/api/tools')).json.tools).toHaveLength(0);
+    expect((await api(env, 'GET', '/api/tools?include_archived=true')).json.tools).toHaveLength(0);
+    expect((await api(env, 'GET', '/api/dashboard')).json.alerts).toHaveLength(0);
+
+    // ...but the row and its payment history are still there to restore.
+    const detail = await api(env, 'GET', `/api/tools/${tool.id}`);
+    expect(detail.status).toBe(200);
+    expect(detail.json.tool.deleted_at).not.toBeNull();
+    expect(detail.json.payments).toHaveLength(1);
+
+    const trash = await api(env, 'GET', '/api/tools/trash');
+    expect(trash.json.tools).toHaveLength(1);
+    expect(trash.json.tools[0].id).toBe(tool.id);
+    expect(trash.json.retention_days).toBe(30);
+  });
+
+  it('records the deletion and the restore in the audit log', async () => {
+    const tool = await createTool();
+    await api(env, 'DELETE', `/api/tools/${tool.id}`);
+    await api(env, 'POST', `/api/tools/${tool.id}/undelete`, {});
+
+    const detail = await api(env, 'GET', `/api/tools/${tool.id}`);
+    const summaries = detail.json.audit.map((entry: { summary: string }) => entry.summary);
+    expect(summaries).toContain(`Moved ${tool.name} to Trash`);
+    expect(summaries).toContain(`Restored ${tool.name} from Trash`);
+  });
+
+  it('can be restored, putting it straight back in the ordinary list', async () => {
+    const tool = await createTool();
+    await api(env, 'DELETE', `/api/tools/${tool.id}`);
+
+    const restored = await api(env, 'POST', `/api/tools/${tool.id}/undelete`, {});
+    expect(restored.status).toBe(200);
+    expect(restored.json.tool.deleted_at).toBeNull();
+
+    expect((await api(env, 'GET', '/api/tools')).json.tools).toHaveLength(1);
+  });
+
+  it('can be purged immediately, skipping the retention window', async () => {
+    const tool = await createTool();
+    await api(env, 'DELETE', `/api/tools/${tool.id}`);
+
+    const purged = await api(env, 'DELETE', `/api/tools/trash/${tool.id}`);
+    expect(purged.status).toBe(200);
+    expect((await api(env, 'GET', '/api/tools/trash')).json.tools).toHaveLength(0);
+    expect((await api(env, 'GET', `/api/tools/${tool.id}`)).status).toBe(404);
+  });
+
+  it('404s deleting a tool that is already in the trash, or one that never existed', async () => {
+    const tool = await createTool();
+    await api(env, 'DELETE', `/api/tools/${tool.id}`);
+    expect((await api(env, 'DELETE', `/api/tools/${tool.id}`)).status).toBe(404);
+    expect((await api(env, 'DELETE', '/api/tools/nope')).status).toBe(404);
+  });
+
+  it('purges a trashed tool once it has sat past the retention window, but not before', async () => {
+    const fresh = await createTool({ name: 'Deleted today' });
+    const stale = await createTool({ name: 'Deleted a month ago' });
+    await api(env, 'DELETE', `/api/tools/${fresh.id}`);
+    await api(env, 'DELETE', `/api/tools/${stale.id}`);
+
+    // Backdate one of them past the retention window, as if it had sat there a while.
+    const old = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+    await db.prepare('UPDATE tools SET deleted_at = ? WHERE id = ?').bind(old, stale.id).run();
+
+    const removed = await purgeOldTrash(db);
+    expect(removed).toBe(1);
+
+    const trash = await api(env, 'GET', '/api/tools/trash');
+    expect(trash.json.tools.map((t: { id: string }) => t.id)).toEqual([fresh.id]);
   });
 });
 

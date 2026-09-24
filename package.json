@@ -5,39 +5,49 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
-    "dev:api": "wrangler dev --port 8787",
+    "dev:api": "tsx watch src/server/dev.ts",
     "dev:web": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run build:azure",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "migrate:local": "wrangler d1 migrations apply tools_db --local",
-    "seed:generate": "node scripts/generate-seed.mjs > seed/dev-seed.sql",
-    "seed:local": "wrangler d1 execute tools_db --local --file=seed/dev-seed.sql",
-    "db:reset": "npm run migrate:local && npm run seed:local",
+    "seed:generate": "node scripts/generate-seed.mjs > seed/dev-seed.sql && node scripts/seed-to-module.mjs",
     "test:e2e": "node tests/e2e/smoke.mjs",
     "build:demo": "vite build --config vite.demo.config.ts",
-    "demo:data": "node scripts/build-demo-data.mjs > src/client/demo/data.json"
+    "demo:data": "node scripts/build-demo-data.mjs > src/client/demo/data.json",
+    "build:api": "node scripts/build-api.mjs",
+    "build:azure": "tsc --noEmit && vite build && npm run build:api",
+    "migrate:pg": "node scripts/migrate-postgres.mjs",
+    "db:reset": "node scripts/reset-dev-db.mjs",
+    "seed:local": "node scripts/reset-dev-db.mjs"
   },
   "dependencies": {
+    "@azure/functions": "^4.16.5",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/lexend": "^5.3.0",
+    "@fontsource-variable/source-sans-3": "^5.3.0",
     "hono": "^4.13.8",
+    "pg": "^8.23.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-router-dom": "^7.18.4",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@hono/node-server": "^2.1.1",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.1",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
     "better-sqlite3": "^13.0.3",
     "concurrently": "^10.0.5",
     "playwright": "^1.63.0",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.0",
-    "vitest": "^5.0.1",
-    "wrangler": "^4.134.0"
+    "vitest": "^5.0.1"
   }
 }

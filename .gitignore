@@ -7,3 +7,9 @@ dist/
 test-results/
 playwright-report/
 tmp/
+
+# local dev database
+.data/
+
+# Reference copy of the company dashboard, kept for design comparison only
+HARTS-internal-tools-dashboard/

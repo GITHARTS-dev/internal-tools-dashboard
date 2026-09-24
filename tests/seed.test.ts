@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
 import { sqliteDb } from '../src/server/repo/sqlite';
-import { api, testEnv } from './db-helper';
+import { api, testEnv, migrationFiles, MIGRATIONS_DIR } from './db-helper';
 
 /**
  * The seed file is what anyone reviewing this app will actually look at, so
@@ -13,7 +13,11 @@ import { api, testEnv } from './db-helper';
 function seededEnv() {
   const raw = new Database(':memory:');
   raw.exec('PRAGMA foreign_keys = ON');
-  raw.exec(readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
+  // Every migration, in order: the dashboard reads tables that arrived after
+  // 0001, and a database built from 0001 alone only worked while it did not.
+  for (const file of migrationFiles()) {
+    raw.exec(readFileSync(new URL(file, MIGRATIONS_DIR), 'utf8'));
+  }
   raw.exec(readFileSync(new URL('../seed/dev-seed.sql', import.meta.url), 'utf8'));
   return testEnv(sqliteDb(raw));
 }

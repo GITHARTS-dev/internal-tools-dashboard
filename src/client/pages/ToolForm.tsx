@@ -28,6 +28,8 @@ interface FormState {
   renewal_date: string; auto_renew: boolean; cancellation_notice_days: string;
   account_ref: string; billing_email: string; payment_method: string;
   vendor_url: string; started_on: string; notes: string;
+  /** '' means bought SaaS; otherwise the internal product this cost belongs to. */
+  internal_product_id: string;
 }
 
 const BLANK: FormState = {
@@ -37,7 +39,7 @@ const BLANK: FormState = {
   seats_purchased: '', seats_used: '',
   renewal_date: '', auto_renew: true, cancellation_notice_days: '0',
   account_ref: '', billing_email: '', payment_method: '',
-  vendor_url: '', started_on: '', notes: '',
+  vendor_url: '', started_on: '', notes: '', internal_product_id: '',
 };
 
 const CYCLE_LABEL: Record<string, string> = {
@@ -57,6 +59,7 @@ export default function ToolForm() {
 
   const existing = useAsync(() => (id ? api.tool(id) : Promise.resolve(null)), [id]);
   const options = useAsync(() => api.toolOptions(), []);
+  const products = useAsync(() => api.internalProducts(), []);
 
   const [form, setForm] = useState<FormState>(BLANK);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -88,6 +91,7 @@ export default function ToolForm() {
       vendor_url: tool.vendor_url ?? '',
       started_on: tool.started_on ?? '',
       notes: tool.notes ?? '',
+      internal_product_id: tool.internal_product_id ?? '',
     });
   }, [existing.data]);
 
@@ -116,6 +120,8 @@ export default function ToolForm() {
       owner_name: form.owner_name,
       owner_email: form.owner_email,
       department: form.department,
+      // '' would be stored as an empty string; null is what "unattributed" means.
+      internal_product_id: form.internal_product_id || null,
       billing_cycle: form.billing_cycle,
       cost_amount: form.cost ? parseMoneyInput(form.cost, form.currency) : null,
       currency: form.currency,
@@ -256,6 +262,26 @@ export default function ToolForm() {
           <div className="field">
             <label htmlFor="department">Department</label>
             <input id="department" value={form.department} onChange={(e) => set('department', e.target.value)} />
+          </div>
+
+          <div className="field">
+            <label htmlFor="internal_product_id">Part of running one of our products</label>
+            <select
+              id="internal_product_id"
+              value={form.internal_product_id}
+              onChange={(e) => set('internal_product_id', e.target.value)}
+            >
+              <option value="">No — this is a tool we buy</option>
+              {(products.data?.products ?? []).map((product) => (
+                <option key={product.id} value={product.id}>
+                  {product.name}
+                </option>
+              ))}
+            </select>
+            <span className="help">
+              Hosting, domains and APIs that keep our own software running. Picking a product moves
+              this cost out of “bought subscriptions” in the cost summary.
+            </span>
           </div>
 
           <div className="fieldset-title">What it costs</div>

@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import { api, ApiError, type ImportResult, type ReminderRunResponse } from '../lib/api';
+import { Link } from 'react-router-dom';
+import { api, ApiError, type AwsImportResponse, type ImportResult, type ReminderRunResponse } from '../lib/api';
 import { useAsync } from '../lib/hooks';
 import { Badge, Banner, EmptyState, Loading, useToast } from '../components/ui';
 import { AlertRow } from '../components/ui';
+import { IconRefresh, IconSend } from '../components/icons';
 import { formatDate } from '../../shared/dates';
 
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -11,7 +13,7 @@ const CHANNEL_HELP: Record<string, string> = {
   console:
     'Always on. Writes what would be sent to the server log, so the reminder engine can be watched working with no credentials at all.',
   teams:
-    'Paste an incoming webhook URL from a Teams channel (create one via Workflows → “When a Teams webhook request is received”). No app registration or admin consent needed.',
+    'Sends each reminder as a personal Teams chat to the people named in a Workflows flow (“When a Teams webhook request is received”, then one “Post card in a chat” step per person). Paste that flow’s URL below. No app registration or admin consent needed.',
   email:
     'Inert until credentials exist. Set EMAIL_PROVIDER to “graph” (uses your existing M365 tenant, sends from your own domain) or “resend”, plus the matching secrets.',
 };
@@ -38,6 +40,8 @@ export default function Settings() {
       teams_webhook_url: s.teams_webhook_url,
       email_from: s.email_from,
       email_to: s.email_to,
+      reporting_currency: s.reporting_currency,
+      fx_auto_refresh: String(s.fx_auto_refresh),
     });
   }, [data]);
 
@@ -70,6 +74,8 @@ export default function Settings() {
         teams_webhook_url: form['teams_webhook_url'] ?? '',
         email_from: form['email_from'] ?? '',
         email_to: form['email_to'] ?? '',
+        reporting_currency: (form['reporting_currency'] ?? 'INR').toUpperCase(),
+        fx_auto_refresh: form['fx_auto_refresh'] ?? 'true',
       });
       toast('Settings saved.');
       reload();
@@ -96,7 +102,7 @@ export default function Settings() {
           A channel only sends when it has what it needs. Nothing here is guesswork — this is the
           live state the reminder job will see.
         </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {data.channels.map((channel) => (
             <div key={channel.name} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
               <div style={{ minWidth: 92 }}>
@@ -104,16 +110,23 @@ export default function Settings() {
                   {channel.configured ? 'Ready' : 'Not set up'}
                 </Badge>
               </div>
-              <div>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, textTransform: 'capitalize' }}>{channel.name}</div>
                 <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
                   {CHANNEL_HELP[channel.name]}
                 </div>
               </div>
+              {/* Console needs no proving; the other two do. */}
+              {channel.name !== 'console' ? (
+                <TestChannelButton name={channel.name} enabled={channel.configured} />
+              ) : null}
             </div>
           ))}
         </div>
       </section>
+
+      <FxPanel />
+      <AwsPanel />
 
       <form onSubmit={save}>
         <section className="card">
@@ -185,6 +198,38 @@ export default function Settings() {
               />
             </div>
 
+            <div className="fieldset-title">Reporting</div>
+
+            <div className="field">
+              <label htmlFor="reporting_currency">Report combined totals in</label>
+              <input
+                id="reporting_currency"
+                value={form['reporting_currency'] ?? ''}
+                maxLength={3}
+                style={{ textTransform: 'uppercase' }}
+                onChange={(e) => set('reporting_currency', e.target.value)}
+              />
+              <span className="help">
+                The currency the cost summary is expressed in. Amounts in other currencies are
+                converted at ECB rates and always labelled as converted.
+              </span>
+            </div>
+
+            <div className="field">
+              <label htmlFor="fx_auto_refresh">Fetch exchange rates automatically</label>
+              <select
+                id="fx_auto_refresh"
+                value={form['fx_auto_refresh'] ?? 'true'}
+                onChange={(e) => set('fx_auto_refresh', e.target.value)}
+              >
+                <option value="true">Yes, with the daily job</option>
+                <option value="false">No, I will fetch them by hand</option>
+              </select>
+              <span className="help">
+                The daily job asks the ECB for any newly published month before sending reminders.
+              </span>
+            </div>
+
             <div className="fieldset-title">Delivery</div>
 
             <div className="field wide">
@@ -195,7 +240,10 @@ export default function Settings() {
                 onChange={(e) => set('teams_webhook_url', e.target.value)}
                 placeholder="https://prod-XX.westus.logic.azure.com:443/workflows/..."
               />
-              <span className="help">Paste it here and Teams reminders start working immediately.</span>
+              <span className="help">
+                Who receives the chat is set in the flow itself, so adding or removing a person is
+                done there, not here. Use “Send test” above to check it reaches them.
+              </span>
             </div>
 
             <div className="field">
@@ -252,7 +300,463 @@ export default function Settings() {
 
       <DryRunPanel />
       <ImportPanel onDone={reload} />
+      <TrashPanel />
+      <ChangeLogPanel />
     </>
+  );
+}
+
+/**
+ * Deleted tools, restorable until the retention window purges them for good.
+ *
+ * Deleting from the tool page never removes a row outright -- it lands here
+ * instead, so a mistaken click is one button away from undone rather than a
+ * support request.
+ */
+function TrashPanel() {
+  const toast = useToast();
+  const { data, error, loading, reload } = useAsync(() => api.trash(), []);
+  const [busy, setBusy] = useState<string | null>(null);
+  const entries = data?.tools ?? [];
+
+  async function restore(tool: { id: string; name: string }) {
+    setBusy(tool.id);
+    try {
+      await api.undeleteTool(tool.id);
+      toast(`${tool.name} restored from Trash.`);
+      reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'That did not work.', 'error');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function purgeNow(tool: { id: string; name: string }) {
+    const ok = window.confirm(`Permanently delete ${tool.name}? This cannot be undone.`);
+    if (!ok) return;
+    setBusy(tool.id);
+    try {
+      await api.purgeTool(tool.id);
+      toast(`${tool.name} permanently deleted.`);
+      reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'That did not work.', 'error');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Trash</h2>
+        <span className="hint">
+          {data ? `kept ${data.retention_days} days, then removed for good` : ''}
+        </span>
+      </div>
+      {loading && !data ? (
+        <Loading rows={2} />
+      ) : error ? (
+        <Banner tone="warning">{error}</Banner>
+      ) : entries.length === 0 ? (
+        <EmptyState title="Nothing in the trash" compact />
+      ) : (
+        <div>
+          {entries.map((tool) => (
+            <div className="audit-item" key={tool.id}>
+              <span className="audit-when">{formatDate((tool.deleted_at ?? '').slice(0, 10))}</span>
+              <span className="audit-change" style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <Link to={`/tools/${tool.id}`}>{tool.name}</Link>
+                  {tool.deleted_by ? (
+                    <span style={{ color: 'var(--text-muted)' }}> · deleted by {tool.deleted_by}</span>
+                  ) : null}
+                </span>
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={busy === tool.id}
+                  onClick={() => restore(tool)}
+                >
+                  Restore
+                </button>
+                <button
+                  type="button"
+                  className="btn sm danger"
+                  disabled={busy === tool.id}
+                  onClick={() => purgeNow(tool)}
+                >
+                  Delete forever
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Who changed what, newest first. It lives here rather than on the dashboard: it
+ * is an audit trail to consult when something looks wrong, not something to read
+ * on arrival.
+ */
+const CHANGES_SHOWN = 20;
+
+function ChangeLogPanel() {
+  const { data, error, loading } = useAsync(() => api.audit(), []);
+  const [all, setAll] = useState(false);
+  const entries = data?.audit ?? [];
+  const visible = all ? entries : entries.slice(0, CHANGES_SHOWN);
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Change log</h2>
+        <span className="hint">every edit, newest first</span>
+      </div>
+      {loading && !data ? (
+        <Loading rows={3} />
+      ) : error ? (
+        <Banner tone="warning">{error}</Banner>
+      ) : entries.length === 0 ? (
+        <EmptyState title="No changes recorded yet" compact />
+      ) : (
+        <>
+          {visible.map((entry) => (
+            <div key={entry.id} className="audit-item">
+              <span className="audit-when">{formatDate(entry.created_at.slice(0, 10))}</span>
+              <span className="audit-change">
+                {entry.summary ?? entry.action} ·{' '}
+                <span style={{ color: 'var(--text-muted)' }}>{entry.actor}</span>
+              </span>
+            </div>
+          ))}
+          {entries.length > CHANGES_SHOWN ? (
+            <button
+              type="button"
+              className="btn subtle"
+              style={{ marginTop: 10 }}
+              onClick={() => setAll((current) => !current)}
+            >
+              {all ? 'Show fewer' : `Show all ${entries.length}`}
+            </button>
+          ) : null}
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Send one real message down a channel.
+ *
+ * Pasting a webhook URL is the step most likely to be wrong, and without this
+ * the only way to find out is to wait for tomorrow's cron. The test records
+ * nothing, so it cannot consume a real reminder's dedupe key.
+ */
+function TestChannelButton({ name, enabled }: { name: string; enabled: boolean }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+
+  async function send() {
+    setBusy(true);
+    try {
+      const { result } = await api.testChannel(name);
+      if (result.status === 'sent') toast(`Test message sent to ${name}. Go and look.`);
+      else toast(`${name}: ${result.detail}`, 'error');
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : `Could not reach ${name}.`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className="btn sm"
+      onClick={send}
+      disabled={!enabled || busy}
+      title={enabled ? `Send a test message to ${name}` : `Set ${name} up first`}
+    >
+      <IconSend size={13} />
+      {busy ? 'Sending…' : 'Send test'}
+    </button>
+  );
+}
+
+/**
+ * Exchange rates.
+ *
+ * Shows what is stored rather than only offering a button, because the useful
+ * question here is "can the cost summary actually add these currencies up",
+ * and the honest answer is the range of months on hand.
+ */
+function FxPanel() {
+  const toast = useToast();
+  const { data, error, reload } = useAsync(() => api.fxStatus(), []);
+  const [busy, setBusy] = useState(false);
+  const [from, setFrom] = useState('');
+
+  async function refresh() {
+    setBusy(true);
+    try {
+      const result = await api.refreshFx(from || undefined);
+      toast(
+        result.missing.length > 0
+          ? `Saved ${result.saved} rates. The ECB publishes none for: ${result.missing.join(', ')}.`
+          : `Saved ${result.saved} rates, ${result.from} to ${result.to}.`,
+      );
+      reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not reach the ECB.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (error) return <Banner tone="critical">{error}</Banner>;
+  if (!data) return null;
+
+  const { status } = data;
+  const uncovered = data.currencies_in_use.filter(
+    (c) => c !== 'EUR' && c !== data.reporting_currency && !status.currencies.includes(c),
+  );
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Exchange rates</h2>
+        <span className="hint">European Central Bank</span>
+      </div>
+      <p className="card-sub">
+        Only needed to add different currencies together. Each amount is converted at the rate of
+        the month it belongs to, so a past year's total never changes.
+      </p>
+
+      {status.months === 0 ? (
+        <Banner tone="warning">
+          No rates stored yet. Until you fetch some, the cost summary can only count amounts already
+          in {data.reporting_currency}.
+        </Banner>
+      ) : (
+        <dl className="detail-grid" style={{ marginBottom: 16 }}>
+          <div className="detail-item">
+            <dt>Months stored</dt>
+            <dd>
+              {status.months} ({status.earliest} to {status.latest})
+            </dd>
+          </div>
+          <div className="detail-item">
+            <dt>Currencies</dt>
+            <dd>{status.currencies.join(', ') || '--'}</dd>
+          </div>
+          <div className="detail-item">
+            <dt>Last fetched</dt>
+            <dd>
+              {status.last_fetched_at
+                ? new Date(status.last_fetched_at).toLocaleString()
+                : 'Never'}
+            </dd>
+          </div>
+          <div className="detail-item">
+            <dt>Reporting in</dt>
+            <dd>{data.reporting_currency}</dd>
+          </div>
+        </dl>
+      )}
+
+      {uncovered.length > 0 ? (
+        <Banner tone="warning">
+          In use but with no stored rate: {uncovered.join(', ')}. Amounts in{' '}
+          {uncovered.length === 1 ? 'that currency' : 'those currencies'} are left out of combined
+          totals until a rate exists.
+        </Banner>
+      ) : null}
+
+      <div className="toolbar" style={{ marginTop: 14 }}>
+        <div className="field" style={{ maxWidth: 180 }}>
+          <label htmlFor="fx-from">Fetch from month</label>
+          <input
+            id="fx-from"
+            value={from}
+            placeholder="2024-01"
+            onChange={(e) => setFrom(e.target.value)}
+          />
+          <span className="help">Blank fetches the last 24 months.</span>
+        </div>
+        <button type="button" className="btn primary" onClick={refresh} disabled={busy}>
+          <IconRefresh size={14} />
+          {busy ? 'Fetching…' : 'Fetch rates now'}
+        </button>
+      </div>
+
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>
+        The ECB publishes a month's average only once that month has ended, so the current month is
+        always absent. Totals covering it fall back to the most recent month available.
+      </p>
+    </section>
+  );
+}
+
+/**
+ * AWS costs, pulled from Cost Explorer instead of typed in every month.
+ *
+ * The keys live in the host's environment, never here; this panel only says
+ * which are missing, picks where the bill is recorded, and runs an import by
+ * hand -- the daily job does the same for last month once AWS finalises it.
+ */
+function AwsPanel() {
+  const toast = useToast();
+  const { data, error, reload } = useAsync(
+    () => Promise.all([api.awsStatus(), api.internalProducts()]),
+    [],
+  );
+  const [productId, setProductId] = useState('');
+  const [tagKey, setTagKey] = useState('');
+  const [from, setFrom] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<AwsImportResponse | null>(null);
+
+  useEffect(() => {
+    if (!data) return;
+    setProductId(data[0].default_product_id);
+    setTagKey(data[0].tag_key);
+  }, [data]);
+
+  async function saveMapping() {
+    setBusy(true);
+    try {
+      await api.updateSettings({ aws_default_product_id: productId, aws_cost_tag_key: tagKey.trim() });
+      toast('AWS settings saved.');
+      reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not save.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runImport() {
+    setBusy(true);
+    try {
+      const report = await api.importAwsCosts(from.trim() || undefined);
+      setResult(report);
+      toast(`Imported ${report.saved.length} line${report.saved.length === 1 ? '' : 's'} of AWS costs.`);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not reach AWS.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (error) return <Banner tone="critical">{error}</Banner>;
+  if (!data) return null;
+  const [status, { products }] = data;
+  const dirty = productId !== status.default_product_id || tagKey.trim() !== status.tag_key;
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>AWS costs</h2>
+        <Badge tone={status.configured ? 'good' : 'info'} dot>
+          {status.configured ? 'Ready' : 'Not set up'}
+        </Badge>
+      </div>
+      <p className="card-sub">
+        Reads the monthly bill from AWS Cost Explorer (the same total as the invoice, tax and credits
+        included) and records it on the product, so nobody types it in. The daily job imports last
+        month once AWS marks it final, usually in the first few days of the month.
+      </p>
+
+      {status.missing.length > 0 ? (
+        <Banner tone="info">Still needed: {status.missing.join(', ')}.</Banner>
+      ) : null}
+
+      <div className="form-grid" style={{ marginTop: 14 }}>
+        <div className="field">
+          <label htmlFor="aws-product">Record the bill against</label>
+          <select id="aws-product" value={productId} onChange={(e) => setProductId(e.target.value)}>
+            <option value="">Choose a product</option>
+            {products.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <span className="help">
+            With no tag set, this product receives the whole bill. With a tag, it receives only
+            untagged spend.
+          </span>
+        </div>
+
+        <div className="field">
+          <label htmlFor="aws-tag">Split by cost-allocation tag</label>
+          <input id="aws-tag" value={tagKey} placeholder="Product" onChange={(e) => setTagKey(e.target.value)} />
+          <span className="help">
+            Leave blank while there is one product. Once there are more, tag each product's AWS
+            resources with its name (e.g. Product = TRA), activate the tag in AWS Billing, and enter
+            the tag key here.
+          </span>
+        </div>
+      </div>
+
+      <div className="toolbar" style={{ marginTop: 14 }}>
+        <button type="button" className="btn" onClick={saveMapping} disabled={busy || !dirty}>
+          Save
+        </button>
+      </div>
+
+      <div className="toolbar" style={{ marginTop: 18 }}>
+        <div className="field" style={{ maxWidth: 180 }}>
+          <label htmlFor="aws-from">Import from month</label>
+          <input id="aws-from" value={from} placeholder="2025-10" onChange={(e) => setFrom(e.target.value)} />
+          <span className="help">Blank imports the last 12 complete months.</span>
+        </div>
+        <button
+          type="button"
+          className="btn primary"
+          onClick={runImport}
+          disabled={busy || !status.configured || dirty}
+          title={dirty ? 'Save the settings first' : undefined}
+        >
+          <IconRefresh size={14} />
+          {busy ? 'Importing…' : 'Import from AWS'}
+        </button>
+      </div>
+
+      {result ? (
+        <div style={{ marginTop: 14, fontSize: 13, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div>
+            {result.saved.length > 0
+              ? `Recorded ${result.saved.length} line${result.saved.length === 1 ? '' : 's'}, ${result.from} to ${result.to}.`
+              : `Nothing new to record for ${result.from} to ${result.to}.`}
+          </div>
+          {result.kept_manual.length > 0 ? (
+            <Banner tone="warning">
+              Kept what someone typed for{' '}
+              {result.kept_manual.map((k) => `${k.product_name} ${k.month}`).join(', ')}. Delete that line
+              on the product page and import again to use the AWS figure.
+            </Banner>
+          ) : null}
+          {result.unassigned.length > 0 ? (
+            <Banner tone="warning">
+              {result.unassigned.length} amount{result.unassigned.length === 1 ? '' : 's'} matched no
+              product and {result.unassigned.length === 1 ? 'was' : 'were'} not recorded. Choose a
+              product above to catch untagged spend.
+            </Banner>
+          ) : null}
+          {result.estimated_months.length > 0 ? (
+            <div style={{ color: 'var(--text-muted)' }}>
+              Not final yet, skipped: {result.estimated_months.join(', ')}.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
   );
 }
 

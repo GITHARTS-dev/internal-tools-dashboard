@@ -11,6 +11,10 @@ import type { Alert, AppSettings } from '../../shared/types';
  * Office 365 connector accept. Microsoft has been retiring the old connectors,
  * so a Workflows URL is the one to create today -- either works here.
  *
+ * Where the card lands is the workflow's business, not this file's. Ours posts
+ * it to each recipient as a personal chat from the Flow bot rather than into a
+ * channel (DEPLOYMENT.md, step 5), so changing who is told needs no deploy.
+ *
  * Needs nothing but a URL pasted into Settings: no app registration, no admin
  * consent, no credentials. That is why it is the channel that ships first.
  */
@@ -41,7 +45,10 @@ function alertBlock(alert: Alert): unknown {
       },
       {
         type: 'TextBlock',
-        text: [when, owner].filter(Boolean).join('').trim() || alert.detail,
+        // An alert with no date has nothing to say about when, so its detail is
+        // the useful line. Without this a missing-data alert with an owner
+        // rendered as just "· Owner", and told the reader nothing.
+        text: (when ? `${when}${owner}` : `${alert.detail}${owner}`).trim(),
         wrap: true,
         isSubtle: true,
         spacing: 'None',

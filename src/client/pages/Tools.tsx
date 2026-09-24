@@ -139,6 +139,9 @@ export default function Tools() {
         </label>
 
         <span className="spacer" />
+        <Link className="btn subtle" to="/settings" title="Deleted tools, restorable for 30 days">
+          Trash
+        </Link>
         <button type="button" className="btn" onClick={() => exportCsv()}>
           Export CSV
         </button>

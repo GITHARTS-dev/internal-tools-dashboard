@@ -14,7 +14,23 @@
 
 import { addDays, daysBetween, nextOccurrenceOnOrAfter, relativeDays, formatDate } from './dates';
 import { formatMoney, wastedSeatCost } from './money';
-import type { Alert, AlertRule, AppSettings, IsoDate, Payment, Severity, Tool } from './types';
+import {
+  COSTS_FINAL_FROM_DAY,
+  costEntryDue,
+  formatMonth,
+  lastCompleteMonth,
+} from './productCosts';
+import type {
+  Alert,
+  AlertRule,
+  AppSettings,
+  InternalProduct,
+  IsoDate,
+  Payment,
+  ProductCost,
+  Severity,
+  Tool,
+} from './types';
 
 /** Tools in these states are still live enough to warrant renewal reminders. */
 const LIVE_STATUSES = new Set(['active', 'trial']);
@@ -54,6 +70,7 @@ function baseAlert(
     rule,
     severity,
     tool_id: tool.id,
+    product_id: null,
     tool_name: tool.name,
     payment_id: null,
     title,
@@ -85,11 +102,18 @@ export function effectiveRenewalDate(tool: Tool, today: IsoDate): IsoDate | null
   return nextOccurrenceOnOrAfter(tool.renewal_date, tool.billing_cycle, today);
 }
 
+/** What the alert engine needs to know about our own products. Optional: many callers have none. */
+export interface ProductContext {
+  products: InternalProduct[];
+  costs: ProductCost[];
+}
+
 export function computeAlerts(
   tools: Tool[],
   payments: Payment[],
   settings: AppSettings,
   today: IsoDate,
+  productContext: ProductContext = { products: [], costs: [] },
 ): Alert[] {
   const alerts: Alert[] = [];
   const toolById = new Map(tools.map((t) => [t.id, t]));
@@ -274,6 +298,36 @@ export function computeAlerts(
     }
   }
 
+  // -- Product costs --------------------------------------------------------
+  // Manual entry fails one way: by being forgotten while the figures go on
+  // looking current. So a product whose last complete month is still missing is
+  // chased, the same as an overdue payment -- told once on discovery, then again
+  // each week it stays missing, rather than every morning.
+  for (const product of productContext.products) {
+    if (!costEntryDue(product, productContext.costs, today)) continue;
+
+    const month = lastCompleteMonth(today);
+    const week = Math.floor((Number(today.slice(8, 10)) - COSTS_FINAL_FROM_DAY) / 7);
+
+    alerts.push({
+      rule: 'costs_missing',
+      severity: 'warning',
+      tool_id: null,
+      product_id: product.id,
+      tool_name: product.name,
+      payment_id: null,
+      title: `${product.name}: ${formatMonth(month)} costs have not been entered`,
+      detail: `Its dashboard figures use the last three complete months, so until ${formatMonth(month)} is in they are out of date. Enter what its cloud providers billed for the month.`,
+      date: null,
+      days_until: null,
+      amount: null,
+      currency: null,
+      owner_name: product.owner_name,
+      owner_email: product.owner_email,
+      dedupe_key: `costs_missing:${product.id}:${month}:w${week}`,
+    });
+  }
+
   return sortAlerts(alerts);
 }
 
@@ -311,6 +365,7 @@ export function alertsByRule(alerts: Alert[]): Record<AlertRule, Alert[]> {
     renewal_upcoming: [],
     notice_deadline: [],
     missing_data: [],
+    costs_missing: [],
     seats_underused: [],
   } as Record<AlertRule, Alert[]>;
   for (const a of alerts) out[a.rule].push(a);

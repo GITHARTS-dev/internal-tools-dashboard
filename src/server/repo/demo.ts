@@ -1,13 +1,14 @@
 /**
  * Loading and removing the demo dataset.
  *
- * The demo rows come from seed/dev-seed.sql, the same file `npm run seed:local`
- * applies, so there is one definition of the worked example. Every demo row
+ * The demo rows come from seed/dev-seed.sql (via its generated .ts wrapper),
+ * the same file `npm run db:reset` applies, so there is one definition of the
+ * worked example. Every demo row
  * has an id starting `seed-`, which is what lets "remove demo data" take out
  * exactly those rows and leave anything a person entered themselves alone.
  */
 
-import seedSql from '../../../seed/dev-seed.sql';
+import seedSql from '../../../seed/dev-seed';
 import type { DataStatus } from '../../shared/types';
 import type { Db } from './db';
 

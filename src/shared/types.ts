@@ -38,6 +38,56 @@ export interface Tool {
   notes: string | null;
   started_on: IsoDate | null;
   cancelled_on: IsoDate | null;
+  /** Set when this cost is part of running one of our own products. */
+  internal_product_id: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Set when this tool is in the trash. It is excluded from every list until purged or restored. */
+  deleted_at: string | null;
+  deleted_by: string | null;
+}
+
+export type InternalProductStatus = 'live' | 'building' | 'retired';
+
+/**
+ * One of the company's own products. Its running cost is not stored on it. It
+ * has two parts, both computed elsewhere: the fixed subscriptions attributed to
+ * it (hosting plans, domains) and the usage-based costs recorded month by month
+ * (see ProductCost), which vary too much to be a price times a billing cycle.
+ */
+export interface InternalProduct {
+  id: string;
+  name: string;
+  description: string | null;
+  status: InternalProductStatus;
+  owner_name: string | null;
+  owner_email: string | null;
+  launched_on: IsoDate | null;
+  retired_on: IsoDate | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * What one of our own products actually cost in one month, for one provider.
+ *
+ * Recorded, not derived: usage-based cloud spend differs every month, so it is
+ * the amount that was really billed rather than a list price times a cycle.
+ */
+export interface ProductCost {
+  id: string;
+  product_id: string;
+  /** 'YYYY-MM' */
+  month: string;
+  /** Free text -- AWS, Supabase, a domain registrar. Unique per month, case-insensitively. */
+  provider: string;
+  /** Minor units. */
+  amount: number;
+  currency: string;
+  /** 'aws' when imported from Cost Explorer, so it can be told apart from a typed figure. */
+  source: 'manual' | 'aws';
+  note: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -109,6 +159,17 @@ export interface AppSettings {
   teams_webhook_url: string;
   email_from: string;
   email_to: string;
+  /** Currency any combined total is expressed in. */
+  reporting_currency: string;
+  /** Whether the daily job may fetch fresh ECB rates on its own. */
+  fx_auto_refresh: boolean;
+  /**
+   * The product the AWS bill is recorded against: all of it when no tag key is
+   * set, otherwise whatever spend carries no tag matching a product.
+   */
+  aws_default_product_id: string;
+  /** Cost-allocation tag whose values name products, e.g. 'Product'. Blank: one bill, one product. */
+  aws_cost_tag_key: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -123,6 +184,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   teams_webhook_url: '',
   email_from: '',
   email_to: '',
+  reporting_currency: 'INR',
+  fx_auto_refresh: true,
+  aws_default_product_id: '',
+  aws_cost_tag_key: '',
 };
 
 // ---------------------------------------------------------------------------
@@ -135,6 +200,7 @@ export type AlertRule =
   | 'renewal_upcoming'
   | 'notice_deadline'
   | 'missing_data'
+  | 'costs_missing'
   | 'seats_underused';
 
 export type Severity = 'critical' | 'warning' | 'info';
@@ -142,7 +208,11 @@ export type Severity = 'critical' | 'warning' | 'info';
 export interface Alert {
   rule: AlertRule;
   severity: Severity;
-  tool_id: string;
+  /** Null for an alert about one of our own products rather than a tool. */
+  tool_id: string | null;
+  /** Set for an alert about one of our own products; null for a tool. */
+  product_id: string | null;
+  /** Whatever the alert is about: a tool's name, or a product's. */
   tool_name: string;
   payment_id: string | null;
   title: string;
@@ -192,6 +262,13 @@ export interface RenewalTimelineEntry {
   tool_name: string;
   date: IsoDate;
   days_until: number;
+  /**
+   * The last day to cancel without being charged for another period. Null for a
+   * tool that does not auto-renew or has no notice period. It can be in the past
+   * while the renewal is still ahead: that is the window that has already closed.
+   */
+  notice_date: IsoDate | null;
+  notice_days_until: number | null;
   amount: number | null;
   currency: string;
   billing_cycle: BillingCycle;
@@ -204,6 +281,146 @@ export interface DashboardData {
   alerts: Alert[];
   category_spend: CategorySpend[];
   renewal_timeline: RenewalTimelineEntry[];
+}
+
+// ---------------------------------------------------------------------------
+// The CEO view: one currency, stated assumptions
+// ---------------------------------------------------------------------------
+
+/** Running cost of one of our own products, rolled up from its tools. */
+export interface InternalProductCost {
+  product: InternalProduct;
+  tool_count: number;
+  /**
+   * The fixed part: subscriptions attributed to this product, per currency and
+   * before conversion. Usage costs are not here -- they are recorded per month
+   * and only exist in converted form.
+   */
+  monthly: Record<string, number>;
+  annual: Record<string, number>;
+  /** Fixed subscriptions only, converted. Null when rates were missing. */
+  fixed_monthly_reported: number | null;
+  fixed_annual_reported: number | null;
+  /**
+   * Usage-based costs, as a recent monthly average and that average x 12.
+   * Null when no month in the window has been entered, which is "unknown", not
+   * "free".
+   */
+  usage_monthly_reported: number | null;
+  usage_annual_reported: number | null;
+  /** How many of the last three complete months the average is over. */
+  usage_months_counted: number;
+  /** The most recent month with any entry, complete or not. */
+  last_cost_month: string | null;
+  /**
+   * True when last month's costs are overdue to be entered. The same definition
+   * the reminder uses, so the flag on screen and the message in Teams agree.
+   */
+  cost_entry_due: boolean;
+  /** Fixed + usage. What the dashboard shows for this product. */
+  monthly_reported: number | null;
+  annual_reported: number | null;
+}
+
+/** A tool paying for seats nobody is using. */
+export interface IdleTool {
+  id: string;
+  label: string;
+  seats_purchased: number;
+  seats_used: number;
+  /** Annualised value of the idle seats, converted. */
+  annual_reported: number;
+}
+
+/** A ranked line in one of the concentration charts. */
+export interface RankedSpend {
+  id: string;
+  label: string;
+  sublabel: string | null;
+  /** Annualised, converted into the reporting currency. */
+  annual_reported: number;
+  /** The untouched figure, so the original currency stays visible. */
+  amount: number | null;
+  currency: string;
+}
+
+/**
+ * Spend over the last two complete years, for the trend.
+ *
+ * The current month is deliberately excluded: it is always partial, and a
+ * half-finished month plotted beside complete ones reads as a collapse in
+ * spending that has not happened.
+ */
+export interface PeriodComparison {
+  /** The 12 complete months ending last month. */
+  trailing_12: number | null;
+  /** The 12 complete months before those. */
+  previous_12: number | null;
+  /** Percentage change between them; null when there is no base to compare. */
+  change_pct: number | null;
+  /** First and last month of the trailing window, for labelling. */
+  from: string | null;
+  to: string | null;
+}
+
+/**
+ * Everything the CEO summary shows, with the conversion made explicit.
+ *
+ * `gaps` is not an error channel. It is the list of amounts that could not be
+ * converted and are therefore absent from the totals, shown on screen so the
+ * headline number is never quietly wrong.
+ */
+export interface CeoSummary {
+  today: IsoDate;
+  /** The most recent month that has fully ended: the one whose costs should be in by now. */
+  latest_complete_month: string;
+  reporting_currency: string;
+  /** Bought SaaS: tools not attributed to one of our own products. */
+  subscriptions: {
+    tool_count: number;
+    monthly_reported: number | null;
+    annual_reported: number | null;
+  };
+  /** Our own products' running cost. */
+  internal: {
+    product_count: number;
+    tool_count: number;
+    /** Fixed subscriptions + usage. */
+    monthly_reported: number | null;
+    annual_reported: number | null;
+    /** The usage-based part of that, so the screen can say how much of it varies. */
+    usage_annual_reported: number | null;
+  };
+  products: InternalProductCost[];
+  total_monthly_reported: number | null;
+  total_annual_reported: number | null;
+  /** Actually-paid spend by year, from the ledger, at each month's own rate. */
+  paid_by_year: Array<{ year: string; amount: number }>;
+  /**
+   * Actually-paid spend per month, converted, for the trend. `subscriptions` is
+   * what the payments ledger says was paid; `usage` is the recorded cloud
+   * costs. They are kept apart so the chart can show which one moved.
+   */
+  paid_by_month: Array<{ month: string; amount: number; subscriptions: number; usage: number }>;
+  /** The tools with the most idle-seat cost, biggest first. */
+  idle_tools: IdleTool[];
+  /** Is spending rising or falling, on complete months only. */
+  comparison: PeriodComparison;
+  /** The costliest subscriptions, biggest first. */
+  top_tools: RankedSpend[];
+  /** Annual spend per category, biggest first. */
+  by_category: RankedSpend[];
+  /**
+   * Annual value of seats paid for but not used, converted. The one number on
+   * this page that names money already being wasted.
+   */
+  idle_seat_cost: number | null;
+  idle_seat_count: number;
+  /** Amounts left out of the totals because no rate covered them. */
+  gaps: Array<{ currency: string; month: string | null; count: number }>;
+  /** Months whose ECB rates the totals used. */
+  rate_months: string[];
+  fx_available: boolean;
 }
 
 /** How much is stored, and how much of it is the built-in demo data. */

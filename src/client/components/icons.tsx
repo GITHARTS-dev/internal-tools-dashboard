@@ -55,13 +55,6 @@ export const IconTools = (p: IconProps) => (
   </Icon>
 );
 
-export const IconPayments = (p: IconProps) => (
-  <Icon {...p}>
-    <rect x="3" y="6" width="18" height="13" rx="2" />
-    <path d="M3 10h18M7 15h4" />
-  </Icon>
-);
-
 export const IconHistory = (p: IconProps) => (
   <Icon {...p}>
     <path d="M3.5 9A9 9 0 1 1 3 12" />

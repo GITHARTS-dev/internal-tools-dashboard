@@ -133,13 +133,6 @@ try {
   const toolsAfterPreview = await (await page.request.get(`${BASE}/api/tools?search=E2E Imported`)).json();
   check('previewing an import writes nothing', toolsAfterPreview.tools.length === 0);
 
-  // --- Payments ledger -----------------------------------------------------
-  await page.goto(`${BASE}/payments`, { waitUntil: 'networkidle' });
-  check('the ledger lists outstanding payments', (await page.locator('tbody tr').count()) > 0);
-  await page.getByRole('button', { name: 'Paid', exact: true }).click();
-  await page.waitForTimeout(800);
-  check('the paid view loads', (await page.locator('tbody tr').count()) > 0);
-
   // --- History -------------------------------------------------------------
   await page.goto(`${BASE}/history`, { waitUntil: 'networkidle' });
   const history = await page.textContent('body');

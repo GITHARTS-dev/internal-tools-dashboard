@@ -85,7 +85,7 @@ export interface ProductCost {
   /** Minor units. */
   amount: number;
   currency: string;
-  /** 'manual' today; reserved so a later import can be told apart from a typed figure. */
+  /** 'aws' when imported from Cost Explorer, so it can be told apart from a typed figure. */
   source: 'manual' | 'aws';
   note: string | null;
   created_at: string;
@@ -163,6 +163,13 @@ export interface AppSettings {
   reporting_currency: string;
   /** Whether the daily job may fetch fresh ECB rates on its own. */
   fx_auto_refresh: boolean;
+  /**
+   * The product the AWS bill is recorded against: all of it when no tag key is
+   * set, otherwise whatever spend carries no tag matching a product.
+   */
+  aws_default_product_id: string;
+  /** Cost-allocation tag whose values name products, e.g. 'Product'. Blank: one bill, one product. */
+  aws_cost_tag_key: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -179,6 +186,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   email_to: '',
   reporting_currency: 'INR',
   fx_auto_refresh: true,
+  aws_default_product_id: '',
+  aws_cost_tag_key: '',
 };
 
 // ---------------------------------------------------------------------------

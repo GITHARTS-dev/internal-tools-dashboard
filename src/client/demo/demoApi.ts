@@ -141,6 +141,8 @@ function settings(): AppSettings {
       rawSettings['reporting_currency'] || DEFAULT_SETTINGS.reporting_currency
     ).toUpperCase(),
     fx_auto_refresh: rawSettings['fx_auto_refresh'] !== 'false',
+    aws_default_product_id: rawSettings['aws_default_product_id'] ?? '',
+    aws_cost_tag_key: rawSettings['aws_cost_tag_key'] ?? '',
   };
 }
 
@@ -838,6 +840,21 @@ export const demoApi = {
 
   async setFxRate(): Promise<never> {
     throw new ApiError('Rates are fixed in this demo.', 400);
+  },
+
+  // ------------------------------------------------------------------ AWS
+
+  async awsStatus() {
+    return reply({
+      configured: false,
+      missing: ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'],
+      tag_key: settings().aws_cost_tag_key,
+      default_product_id: settings().aws_default_product_id,
+    });
+  },
+
+  async importAwsCosts(): Promise<never> {
+    throw new ApiError('This demo has no AWS account behind it. Run the app with AWS keys set to import costs.', 400);
   },
 
   async testChannel(): Promise<never> {

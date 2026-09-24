@@ -3,8 +3,8 @@
 Everything that can be built without live credentials is built and tested. This
 file is what remains, in order, with the exact commands.
 
-Nothing here has been run. No Azure resource, Supabase project or Teams channel
-exists yet.
+Nothing here has been run. No Azure resource, Supabase project, Teams workflow
+or AWS key exists yet.
 
 ```
 GitHub push
@@ -26,7 +26,8 @@ Reminders: a scheduled GitHub Actions workflow calls POST /api/reminders/run
 | Supabase project | supabase.com → New project | Free tier |
 | Azure Static Web App | Portal → Create → Static Web App → **Free** plan | Free |
 | Entra app registration | Portal → Entra ID → App registrations | Free |
-| Teams webhook | Teams → channel → Workflows | Free |
+| Teams workflow | Teams → Workflows (sends each recipient a personal chat) | Free |
+| AWS IAM user | AWS console, in the account the bill comes from | ~USD 0.01 a month |
 
 The Functions app, its routes and the HTTPS certificate are all created by the
 deploy. There is nothing to click for those, and **no domain is needed** —
@@ -134,6 +135,8 @@ Copy the **deployment token** (Overview → Manage deployment token).
 | `AAD_CLIENT_SECRET` | The client secret value |
 | `REMINDER_TOKEN` | A long random string you generate |
 | `TEAMS_WEBHOOK_URL` | From step 5 (optional; can also live in Settings) |
+| `AWS_ACCESS_KEY_ID` | From step 6 |
+| `AWS_SECRET_ACCESS_KEY` | From step 6 |
 | `APP_ENV` | `production` |
 
 Generate the reminder token with:
@@ -162,11 +165,14 @@ reload demo data.
 Push to the deployment branch, or run the workflow by hand from the Actions tab.
 It runs `npm test` first, so a broken build does not reach production.
 
-Then check it:
+Then check it by signing in and opening this in the browser:
 
-```bash
-curl https://<your-site>.azurestaticapps.net/api/health
 ```
+https://<your-site>.azurestaticapps.net/api/health
+```
+
+It should show `"ok": true`. A plain `curl` gets a redirect to the sign-in
+page instead, because the API sits behind the Entra rule like everything else.
 
 Two things are worth verifying deliberately:
 
@@ -186,24 +192,45 @@ running the reminder workflow once does the same job.)
 
 ---
 
-## 5. Teams reminders
+## 5. Teams reminders, as personal chats
 
-The Teams channel is fully coded. It needs one URL and nothing else — no app
-registration, no admin consent.
+Reminders go to named people as a private Teams chat, not into a channel. The
+app posts one card to a webhook; a Teams workflow receives it and sends it on to
+each person. No app registration, no admin consent, and no code change to add
+or remove someone -- the list of recipients lives in the workflow.
 
-1. In Teams, open the channel reminders should go to.
-2. `⋯` beside the channel name → **Workflows**.
-3. Template: **"Post to a channel when a webhook request is received"**.
-4. Name it, confirm the team and channel, finish.
-5. Copy the URL.
+Build it once, signed in as either recipient:
 
-That URL is a password — anyone holding it can post into the channel. Put it in
+1. In Teams, open **Workflows** (in the left rail, or `⋯` → Workflows).
+2. Start from **"Send webhook alerts to a chat"**, or create a blank flow whose
+   trigger is **"When a Teams webhook request is received"**.
+3. In the trigger, set **Who can trigger the flow** to **Anyone**. The app has no
+   Microsoft identity to sign the request with; the URL itself is the secret.
+4. Inside the **Apply to each** over the request's `attachments`, use
+   **Post card in a chat or channel** with:
+   - Post as: **Flow bot**
+   - Post in: **Chat with Flow bot**
+   - Recipient: the first person's email
+   - Adaptive Card: the loop item's `content`
+5. Add a second **Post card in a chat or channel**, the same except for the
+   recipient: the second person. A third person later is a third step.
+6. Save, then copy the webhook URL from the trigger.
+
+Labels shift a little between Teams versions; the shape is always trigger →
+loop over attachments → one post-to-chat step per person.
+
+That URL is a password -- anyone holding it can message those people. Put it in
 the SWA environment variables as `TEAMS_WEBHOOK_URL`, or paste it into the app's
 own Settings page.
 
-Then press **Send test** beside Teams in Settings. A card should arrive within
-seconds. The test records nothing, so it cannot consume a real reminder's
-dedupe key.
+Then press **Send test** beside Teams in Settings. Both people should get a chat
+from the Workflows bot within a minute. The test records nothing, so it cannot
+consume a real reminder's dedupe key.
+
+One thing to know: the workflow accepts the card and then delivers it on its
+own, so the app sees "accepted", not "delivered". If a card does not arrive,
+look at the flow's **run history** in Workflows -- that is where a wrong
+recipient or an expired connection shows up.
 
 ### What actually gets sent, and when
 
@@ -215,6 +242,8 @@ the answer is yes:
 - A payment is due soon, or is overdue.
 - The last day to cancel without paying for another period is approaching.
 - A tool is missing data, or has seats nobody uses.
+- A product's costs for last month are still missing from the 5th (once AWS
+  import is set up, the AWS line fills itself before this is checked).
 
 On a quiet day it posts nothing at all. The `notification_log` table's unique
 `dedupe_key` is what guarantees the same alert never goes out twice, per
@@ -249,7 +278,67 @@ fine locally, wrong in production. **Set it.**
 
 ---
 
-## 6. Email (optional, still inert)
+## 6. AWS costs, imported instead of typed
+
+With this in place nobody enters the AWS bill each month: the daily run reads
+last month's total from AWS Cost Explorer once AWS marks it final (usually the
+first few days of the month) and records it on the product. It is the same
+total as the invoice that arrives at the shared mailbox -- usage, tax and
+credits together -- but read from AWS directly, so no mailbox access is needed.
+
+Do this in the AWS account the bill comes from. If you use AWS Organizations,
+that is the management (payer) account.
+
+1. **Billing and Cost Management → Cost Explorer**: open it once if nobody ever
+   has. The first launch can take up to a day to fill with data.
+2. **IAM → Users → Create user**, e.g. `tools-dashboard-costs`, with no console
+   access. Attach an inline policy that allows one read-only call and nothing
+   else:
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       { "Effect": "Allow", "Action": "ce:GetCostAndUsage", "Resource": "*" }
+     ]
+   }
+   ```
+
+3. **Security credentials → Create access key** (use case: application running
+   outside AWS). Put the pair in the SWA environment variables as
+   `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+4. In the app: **Settings → AWS costs**, choose the product the bill belongs to,
+   **Save**, then **Import from AWS** to bring in the past twelve months.
+
+Each request costs USD 0.01. The daily run makes one request a month, plus one
+a day for the few days AWS still calls the month "estimated".
+
+If the import says access is denied although the policy is right, the account
+may have IAM access to billing data switched off: **Account → IAM user and role
+access to Billing information → Activate**.
+
+### When a second product arrives
+
+Every product runs in the same AWS account, so the bill has to be split, and the
+split is a **cost-allocation tag**:
+
+1. Tag each product's AWS resources with the product's name as it appears in
+   the app, e.g. `Product = TRA`, `Product = Timesheet`.
+2. **Billing → Cost allocation tags**: find `Product` and **Activate** it. AWS
+   only splits costs by a tag from the day it is activated, and it takes up to a
+   day to appear -- so activate it as soon as tagging starts.
+3. **Settings → AWS costs → Split by cost-allocation tag**: enter `Product`.
+
+Tagged spend then goes to the product with that name, matched ignoring case.
+Untagged spend -- and anything tagged with a name no product has -- goes to the
+product chosen above, and that line's note says so. Shared things such as a
+support plan or tax are never tagged, so they always land on that product.
+
+A figure someone typed or corrected on a product page is never overwritten by
+an import; the import reports it instead. Delete the typed line and import
+again to use AWS's figure.
+
+## 7. Email (optional, still inert)
 
 The email channel exists and stays skipped until credentials are set. Add these
 as SWA environment variables:
@@ -327,5 +416,9 @@ history, so the common "undo" is a status change, not a restore.
 - [ ] **Private window redirects to sign-in** — not straight into the app
 - [ ] An account outside the tenant is refused
 - [ ] Settings → Exchange rates → **Fetch rates now** pressed once
-- [ ] Teams webhook set, **Send test** produces a card
+- [ ] Teams workflow built, one post-to-chat step per person, trigger set to **Anyone**
+- [ ] Webhook URL set, **Send test** reaches both people
 - [ ] "Send due reminders" workflow run manually, card arrives
+- [ ] AWS: Cost Explorer enabled, IAM user with only `ce:GetCostAndUsage`, keys set
+- [ ] Settings → AWS costs: product chosen, **Import from AWS** records past months
+- [ ] `reminders.yml` merged to `main`, so the daily schedule actually runs

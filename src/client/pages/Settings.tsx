@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, ApiError, type ImportResult, type ReminderRunResponse } from '../lib/api';
+import { api, ApiError, type AwsImportResponse, type ImportResult, type ReminderRunResponse } from '../lib/api';
 import { useAsync } from '../lib/hooks';
 import { Badge, Banner, EmptyState, Loading, useToast } from '../components/ui';
 import { AlertRow } from '../components/ui';
@@ -13,7 +13,7 @@ const CHANNEL_HELP: Record<string, string> = {
   console:
     'Always on. Writes what would be sent to the server log, so the reminder engine can be watched working with no credentials at all.',
   teams:
-    'Paste an incoming webhook URL from a Teams channel (create one via Workflows → “When a Teams webhook request is received”). No app registration or admin consent needed.',
+    'Sends each reminder as a personal Teams chat to the people named in a Workflows flow (“When a Teams webhook request is received”, then one “Post card in a chat” step per person). Paste that flow’s URL below. No app registration or admin consent needed.',
   email:
     'Inert until credentials exist. Set EMAIL_PROVIDER to “graph” (uses your existing M365 tenant, sends from your own domain) or “resend”, plus the matching secrets.',
 };
@@ -126,6 +126,7 @@ export default function Settings() {
       </section>
 
       <FxPanel />
+      <AwsPanel />
 
       <form onSubmit={save}>
         <section className="card">
@@ -239,7 +240,10 @@ export default function Settings() {
                 onChange={(e) => set('teams_webhook_url', e.target.value)}
                 placeholder="https://prod-XX.westus.logic.azure.com:443/workflows/..."
               />
-              <span className="help">Paste it here and Teams reminders start working immediately.</span>
+              <span className="help">
+                Who receives the chat is set in the flow itself, so adding or removing a person is
+                done there, not here. Use “Send test” above to check it reaches them.
+              </span>
             </div>
 
             <div className="field">
@@ -594,6 +598,164 @@ function FxPanel() {
         The ECB publishes a month's average only once that month has ended, so the current month is
         always absent. Totals covering it fall back to the most recent month available.
       </p>
+    </section>
+  );
+}
+
+/**
+ * AWS costs, pulled from Cost Explorer instead of typed in every month.
+ *
+ * The keys live in the host's environment, never here; this panel only says
+ * which are missing, picks where the bill is recorded, and runs an import by
+ * hand -- the daily job does the same for last month once AWS finalises it.
+ */
+function AwsPanel() {
+  const toast = useToast();
+  const { data, error, reload } = useAsync(
+    () => Promise.all([api.awsStatus(), api.internalProducts()]),
+    [],
+  );
+  const [productId, setProductId] = useState('');
+  const [tagKey, setTagKey] = useState('');
+  const [from, setFrom] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<AwsImportResponse | null>(null);
+
+  useEffect(() => {
+    if (!data) return;
+    setProductId(data[0].default_product_id);
+    setTagKey(data[0].tag_key);
+  }, [data]);
+
+  async function saveMapping() {
+    setBusy(true);
+    try {
+      await api.updateSettings({ aws_default_product_id: productId, aws_cost_tag_key: tagKey.trim() });
+      toast('AWS settings saved.');
+      reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not save.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runImport() {
+    setBusy(true);
+    try {
+      const report = await api.importAwsCosts(from.trim() || undefined);
+      setResult(report);
+      toast(`Imported ${report.saved.length} line${report.saved.length === 1 ? '' : 's'} of AWS costs.`);
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'Could not reach AWS.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (error) return <Banner tone="critical">{error}</Banner>;
+  if (!data) return null;
+  const [status, { products }] = data;
+  const dirty = productId !== status.default_product_id || tagKey.trim() !== status.tag_key;
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>AWS costs</h2>
+        <Badge tone={status.configured ? 'good' : 'info'} dot>
+          {status.configured ? 'Ready' : 'Not set up'}
+        </Badge>
+      </div>
+      <p className="card-sub">
+        Reads the monthly bill from AWS Cost Explorer (the same total as the invoice, tax and credits
+        included) and records it on the product, so nobody types it in. The daily job imports last
+        month once AWS marks it final, usually in the first few days of the month.
+      </p>
+
+      {status.missing.length > 0 ? (
+        <Banner tone="info">Still needed: {status.missing.join(', ')}.</Banner>
+      ) : null}
+
+      <div className="form-grid" style={{ marginTop: 14 }}>
+        <div className="field">
+          <label htmlFor="aws-product">Record the bill against</label>
+          <select id="aws-product" value={productId} onChange={(e) => setProductId(e.target.value)}>
+            <option value="">Choose a product</option>
+            {products.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <span className="help">
+            With no tag set, this product receives the whole bill. With a tag, it receives only
+            untagged spend.
+          </span>
+        </div>
+
+        <div className="field">
+          <label htmlFor="aws-tag">Split by cost-allocation tag</label>
+          <input id="aws-tag" value={tagKey} placeholder="Product" onChange={(e) => setTagKey(e.target.value)} />
+          <span className="help">
+            Leave blank while there is one product. Once there are more, tag each product's AWS
+            resources with its name (e.g. Product = TRA), activate the tag in AWS Billing, and enter
+            the tag key here.
+          </span>
+        </div>
+      </div>
+
+      <div className="toolbar" style={{ marginTop: 14 }}>
+        <button type="button" className="btn" onClick={saveMapping} disabled={busy || !dirty}>
+          Save
+        </button>
+      </div>
+
+      <div className="toolbar" style={{ marginTop: 18 }}>
+        <div className="field" style={{ maxWidth: 180 }}>
+          <label htmlFor="aws-from">Import from month</label>
+          <input id="aws-from" value={from} placeholder="2025-10" onChange={(e) => setFrom(e.target.value)} />
+          <span className="help">Blank imports the last 12 complete months.</span>
+        </div>
+        <button
+          type="button"
+          className="btn primary"
+          onClick={runImport}
+          disabled={busy || !status.configured || dirty}
+          title={dirty ? 'Save the settings first' : undefined}
+        >
+          <IconRefresh size={14} />
+          {busy ? 'Importing…' : 'Import from AWS'}
+        </button>
+      </div>
+
+      {result ? (
+        <div style={{ marginTop: 14, fontSize: 13, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div>
+            {result.saved.length > 0
+              ? `Recorded ${result.saved.length} line${result.saved.length === 1 ? '' : 's'}, ${result.from} to ${result.to}.`
+              : `Nothing new to record for ${result.from} to ${result.to}.`}
+          </div>
+          {result.kept_manual.length > 0 ? (
+            <Banner tone="warning">
+              Kept what someone typed for{' '}
+              {result.kept_manual.map((k) => `${k.product_name} ${k.month}`).join(', ')}. Delete that line
+              on the product page and import again to use the AWS figure.
+            </Banner>
+          ) : null}
+          {result.unassigned.length > 0 ? (
+            <Banner tone="warning">
+              {result.unassigned.length} amount{result.unassigned.length === 1 ? '' : 's'} matched no
+              product and {result.unassigned.length === 1 ? 'was' : 'were'} not recorded. Choose a
+              product above to catch untagged spend.
+            </Banner>
+          ) : null}
+          {result.estimated_months.length > 0 ? (
+            <div style={{ color: 'var(--text-muted)' }}>
+              Not final yet, skipped: {result.estimated_months.join(', ')}.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

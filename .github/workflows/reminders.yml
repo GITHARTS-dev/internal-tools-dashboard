@@ -49,4 +49,5 @@ jobs:
             for (const c of r.alert_dispatch.channels) {
               console.log(\`  \${c.channel}: \${c.status} — \${c.detail}\`);
             }
+            if (r.aws) console.log('AWS costs:', JSON.stringify(r.aws));
           "

@@ -119,6 +119,23 @@ export interface FxRefreshResponse {
   status: FxStatusResponse['status'];
 }
 
+export interface AwsStatusResponse {
+  configured: boolean;
+  /** What the import is still waiting for: env var names, or a product to record against. */
+  missing: string[];
+  tag_key: string;
+  default_product_id: string;
+}
+
+export interface AwsImportResponse {
+  from: string;
+  to: string;
+  saved: Array<{ product_id: string; product_name: string; month: string; amount: number; currency: string; created: boolean }>;
+  kept_manual: Array<{ product_name: string; month: string }>;
+  unassigned: Array<{ month: string; tag: string; amount: number; currency: string }>;
+  estimated_months: string[];
+}
+
 export type InternalProductWithCount = InternalProduct & { tool_count: number };
 
 export interface ProductCostsResponse {
@@ -260,6 +277,16 @@ export const api = {
       `/fx/rates/${month}/${currency}`,
       { method: 'PUT', ...json({ rate }) },
     ),
+
+  // ------------------------------------------------------------------ AWS
+  awsStatus: () => request<AwsStatusResponse>('/aws/status'),
+  importAwsCosts: (from?: string, to?: string) => {
+    const query = new URLSearchParams();
+    if (from) query.set('from', from);
+    if (to) query.set('to', to);
+    const qs = query.toString();
+    return request<AwsImportResponse>(`/aws/import${qs ? `?${qs}` : ''}`, { method: 'POST' });
+  },
 
   // --------------------------------------------------- internal products
   internalProducts: () =>

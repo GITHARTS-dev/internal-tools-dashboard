@@ -45,6 +45,8 @@ export async function getSettings(db: Db): Promise<AppSettings> {
     reporting_currency:
       (raw['reporting_currency'] || DEFAULT_SETTINGS.reporting_currency).toUpperCase(),
     fx_auto_refresh: raw['fx_auto_refresh'] !== 'false',
+    aws_default_product_id: (raw['aws_default_product_id'] ?? '').trim(),
+    aws_cost_tag_key: (raw['aws_cost_tag_key'] ?? '').trim(),
   };
 }
 

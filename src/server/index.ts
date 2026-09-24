@@ -8,6 +8,7 @@ import { importExportRoutes } from './routes/importExport';
 import { documentsRoutes } from './routes/documents';
 import { fxRoutes } from './routes/fx';
 import { internalProductRoutes } from './routes/internalProducts';
+import { awsRoutes } from './routes/aws';
 
 /**
  * The API.
@@ -30,6 +31,7 @@ app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/documents', documentsRoutes);
 app.route('/api', fxRoutes);
 app.route('/api', internalProductRoutes);
+app.route('/api', awsRoutes);
 app.route('/api', adminRoutes);
 app.route('/api', importExportRoutes);
 

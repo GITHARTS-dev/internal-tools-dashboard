@@ -78,20 +78,46 @@ export interface UpsertResult {
   created: boolean;
 }
 
+/** The line for one product, month and provider, compared case-insensitively. */
+export async function findProductCost(
+  db: Db,
+  productId: string,
+  month: string,
+  provider: string,
+): Promise<ProductCost | null> {
+  const row = await db
+    .prepare(
+      `SELECT ${COLUMNS} FROM product_costs
+       WHERE product_id = ? AND month = ? AND LOWER(provider) = LOWER(?)`,
+    )
+    .bind(productId, month, provider)
+    .first<Row>();
+  return row ? mapCost(row) : null;
+}
+
+/** Whether any line for this month was imported rather than typed. */
+export async function hasImportedCosts(db: Db, month: string, source: ProductCost['source']): Promise<boolean> {
+  const row = await db
+    .prepare('SELECT COUNT(*) AS n FROM product_costs WHERE month = ? AND source = ?')
+    .bind(month, source)
+    .first<{ n: number }>();
+  return Number(row?.n ?? 0) > 0;
+}
+
+/**
+ * `source` says who wrote the figure. Anything entered through the product page
+ * is 'manual', including a correction to an imported line: once a person has
+ * overridden what AWS said, the next import leaves it alone.
+ */
 export async function upsertProductCost(
   db: Db,
   productId: string,
   input: ProductCostInput,
+  source: ProductCost['source'] = 'manual',
 ): Promise<UpsertResult> {
   const ts = nowIso();
 
-  const existing = await db
-    .prepare(
-      `SELECT id FROM product_costs
-       WHERE product_id = ? AND month = ? AND LOWER(provider) = LOWER(?)`,
-    )
-    .bind(productId, input.month, input.provider)
-    .first<{ id: string }>();
+  const existing = await findProductCost(db, productId, input.month, input.provider);
 
   if (existing) {
     // The provider is rewritten too, so a correction to its spelling or case
@@ -99,10 +125,10 @@ export async function upsertProductCost(
     await db
       .prepare(
         `UPDATE product_costs
-            SET provider = ?, amount = ?, currency = ?, note = ?, source = 'manual', updated_at = ?
+            SET provider = ?, amount = ?, currency = ?, note = ?, source = ?, updated_at = ?
           WHERE id = ?`,
       )
-      .bind(input.provider, input.amount, input.currency, input.note ?? null, ts, existing.id)
+      .bind(input.provider, input.amount, input.currency, input.note ?? null, source, ts, existing.id)
       .run();
     const cost = await getProductCost(db, existing.id);
     if (!cost) throw new Error('Cost vanished immediately after update');
@@ -114,9 +140,9 @@ export async function upsertProductCost(
     .prepare(
       `INSERT INTO product_costs
          (id, product_id, month, provider, amount, currency, source, note, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'manual', ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, productId, input.month, input.provider, input.amount, input.currency, input.note ?? null, ts, ts)
+    .bind(id, productId, input.month, input.provider, input.amount, input.currency, source, input.note ?? null, ts, ts)
     .run();
 
   const cost = await getProductCost(db, id);

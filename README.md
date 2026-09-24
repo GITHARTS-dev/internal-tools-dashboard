@@ -8,12 +8,14 @@ It answers three questions that currently have no home:
 
 1. **What do we pay for, and who owns it?** Every tool, past and present, with
    its cost, owner, seats, billing details and full change history.
-2. **What did we actually pay?** A payment ledger that outlives the
-   subscription, so "what did Canva cost us last year" stays answerable.
-3. **What is about to bite us?** A daily check that posts to Teams before a
-   renewal, before a payment is due, and — the one people actually miss —
-   before the last day to cancel without being charged for another period. On a
-   day when nothing is due, it posts nothing.
+2. **What did we actually pay?** Each tool keeps its payment history on its
+   own page, and it outlives the subscription, so "what did Canva cost us last
+   year" stays answerable. (There is no separate Payments page any more.)
+3. **What is about to bite us?** A daily check that messages the people
+   responsible, as a personal Teams chat, before a renewal, before a payment is
+   due, and — the one people actually miss — before the last day to cancel
+   without being charged for another period. On a day when nothing is due, it
+   sends nothing.
 4. **What does all of it come to?** One figure in one currency at the top of the
    dashboard, splitting what we buy from what it costs to run our own products,
    with the trend and where the money is concentrated underneath.
@@ -57,7 +59,10 @@ Nothing. At this size the whole stack sits inside free tiers:
   a managed Azure Function included in it. No separate resource, no domain
   required, HTTPS and Entra sign-in included.
 - **The scheduler** is a GitHub Actions workflow, free on any plan.
-- **Teams reminders** use an incoming webhook, which is free.
+- **Teams reminders** go through a Teams Workflows webhook that sends each
+  recipient a personal chat. Free, and no admin consent.
+- **AWS costs** are read from Cost Explorer at USD 0.01 per request: about one
+  request a month.
 - **Email** goes over HTTP via Microsoft Graph (free with an M365 tenant you
   already pay for) or Resend (~3,000/month free).
 
@@ -146,7 +151,8 @@ Nothing secret belongs in a committed file.
 | `REMINDER_TOKEN` | Shared secret for `POST /api/reminders/run`, the one endpoint a machine calls. Inert when unset. |
 | `APP_ENV` | `production` disables the demo-data controls. |
 | `FEATURE_DOCUMENTS` | `true` enables contract/invoice records. Off by default -- invoices are not tracked for now; a payment's invoice reference and URL are plain optional text regardless of this flag. |
-| `TEAMS_WEBHOOK_URL` | Teams incoming webhook (can also be set in Settings). |
+| `TEAMS_WEBHOOK_URL` | Teams Workflows webhook that chats the recipients (can also be set in Settings). |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | An IAM user allowed only `ce:GetCostAndUsage`. Unset means AWS costs are typed by hand. |
 | `EMAIL_PROVIDER` | `graph`, `resend`, or unset. Unset means email stays inert. |
 | `MS_TENANT_ID` / `MS_CLIENT_ID` / `MS_CLIENT_SECRET` | Microsoft Graph credentials. |
 | `RESEND_API_KEY` | Resend API key. |
@@ -171,6 +177,15 @@ price times a billing cycle. It is entered as it happens, one line per product
 per month per provider (`TRA · Aug 2026 · AWS · $312.50`), on the product's own
 page. Entering the same month and provider again replaces the line, so
 correcting a figure is the same gesture as entering one.
+
+The AWS line does not have to be typed. With AWS keys set, the daily job reads
+last month's bill from Cost Explorer once AWS marks it final, and records it on
+the product chosen in Settings → **AWS costs**. There is a button there to import
+the past twelve months as well. Every product shares one AWS account, so once
+there is more than one product, tag each one's resources (say `Product=TRA`),
+activate the tag in AWS Billing, and enter the tag key in Settings: tagged spend
+goes to the product of that name, and untagged spend to the default product. A
+figure somebody typed or corrected is never overwritten by an import.
 
 The dashboard adds the two: subscriptions at today's prices, plus usage at the
 average of the last three complete months. That average is labelled an estimate,

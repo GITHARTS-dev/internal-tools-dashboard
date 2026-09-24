@@ -11,6 +11,7 @@ import { listRecentAudit } from '../repo/audit';
 import { recordAudit } from '../repo/audit';
 import { runReminders } from '../reminders';
 import { refreshRatesIfDue } from '../fx/refresh';
+import { importAwsCostsIfDue } from '../aws/import';
 import { DEFAULT_CHANNELS } from '../reminders';
 
 export const adminRoutes = new Hono<{ Bindings: Env }>();
@@ -136,6 +137,22 @@ adminRoutes.post('/reminders/run', async (c) => {
     };
   }
 
+  // Before the reminders, so a month that has just been imported is not also
+  // posted as "costs have not been entered". Stepped over on failure, like FX.
+  let aws: { imported: number; estimated_months: string[]; kept_manual: number; unassigned: number } | { error: string } | null;
+  try {
+    const settings = await getSettings(db(c));
+    const report = await importAwsCostsIfDue(db(c), settings, envVars(c), todayInTimezone(settings.timezone));
+    aws = report && {
+      imported: report.saved.length,
+      estimated_months: report.estimated_months,
+      kept_manual: report.kept_manual.length,
+      unassigned: report.unassigned.length,
+    };
+  } catch (error) {
+    aws = { error: error instanceof Error ? error.message : String(error) };
+  }
+
   const run = await runReminders(db(c), envVars(c), { dryRun: false });
   await recordAudit(db(c), {
     entity: 'reminders',
@@ -144,7 +161,7 @@ adminRoutes.post('/reminders/run', async (c) => {
     actor: actor(c),
     summary: `Ran reminders for ${run.today}`,
   });
-  return c.json({ ...run, fx });
+  return c.json({ ...run, fx, aws });
 });
 
 /**

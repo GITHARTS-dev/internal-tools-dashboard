@@ -7,7 +7,6 @@ import Dashboard from './pages/Dashboard';
 import Tools from './pages/Tools';
 import ToolDetail from './pages/ToolDetail';
 import ToolForm from './pages/ToolForm';
-import Payments from './pages/Payments';
 import History from './pages/History';
 import Settings from './pages/Settings';
 import Products from './pages/Products';
@@ -15,7 +14,6 @@ import ProductDetail from './pages/ProductDetail';
 import {
   IconDashboard,
   IconHistory,
-  IconPayments,
   IconProducts,
   IconSettings,
   IconTools,
@@ -57,7 +55,6 @@ const TITLES: Array<[RegExp, string, string]> = [
   [/^\/tools$/, 'Tools', 'Everything we currently pay for'],
   [/^\/products\/[^/]+$/, 'Product', 'What it costs to run'],
   [/^\/products$/, 'Our products', 'What our own software costs to run'],
-  [/^\/payments$/, 'Payments', 'The ledger of what is due and what was paid'],
   [/^\/history$/, 'History', 'Tools we no longer pay for'],
   [/^\/settings$/, 'Settings', 'Reminders, delivery and preferences'],
 ];
@@ -132,10 +129,6 @@ export default function App() {
               <IconProducts />
               Our products
             </NavLink>
-            <NavLink to="/payments" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
-              <IconPayments />
-              Payments
-            </NavLink>
             <NavLink to="/history" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
               <IconHistory />
               History
@@ -187,7 +180,8 @@ export default function App() {
             <Route path="/tools/new" element={<ToolForm />} />
             <Route path="/tools/:id" element={<ToolDetail />} />
             <Route path="/tools/:id/edit" element={<ToolForm />} />
-            <Route path="/payments" element={<Payments />} />
+            {/* The payments page was retired; a tool's own page still shows its payments. */}
+            <Route path="/payments" element={<Navigate to="/tools" replace />} />
             <Route path="/history" element={<History />} />
             <Route path="/settings" element={<Settings />} />
             <Route

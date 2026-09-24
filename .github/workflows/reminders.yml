@@ -27,9 +27,12 @@ jobs:
           APP_URL: ${{ secrets.APP_URL }}
           REMINDER_TOKEN: ${{ secrets.REMINDER_TOKEN }}
         run: |
+          # Not an error: this runs daily from the moment reminders.yml is on
+          # the default branch, which is before the site necessarily exists.
+          # Nothing to call yet just means nothing to do yet.
           if [ -z "$APP_URL" ] || [ -z "$REMINDER_TOKEN" ]; then
-            echo "::error::APP_URL and REMINDER_TOKEN must both be set as repository secrets."
-            exit 1
+            echo "APP_URL and REMINDER_TOKEN are not both set as repository secrets yet -- skipping. See DEPLOYMENT.md."
+            exit 0
           fi
 
           # --fail-with-body so a non-2xx is a failed run with the reason

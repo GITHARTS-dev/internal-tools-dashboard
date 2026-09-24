@@ -162,6 +162,12 @@ reload demo data.
 
 ## 4. Deploy
 
+Until `AZURE_STATIC_WEB_APPS_API_TOKEN` exists as a repo secret, the workflow
+still runs tests and the build on every push -- that is real CI worth having
+early -- but the Deploy step itself is skipped rather than failing. Adding the
+secret (step 3, "Configuration" above the checklist) is the only change needed
+to turn deployment on; the workflow file does not need touching again.
+
 Push to the deployment branch, or run the workflow by hand from the Actions tab.
 It runs `npm test` first, so a broken build does not reach production.
 

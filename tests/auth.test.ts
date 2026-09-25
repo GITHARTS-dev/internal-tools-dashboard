@@ -72,6 +72,37 @@ describe('verifyBearerToken', () => {
     expect((await verifyBearerToken(bareToken, TENANT, CLIENT, () => jwks)).actor).toBe('the-subject');
   });
 
+  it('accepts the two shapes Entra actually issues: v1 (sts.windows.net, api:// audience) and v2 (bare client ID)', async () => {
+    const v1 = await new SignJWT({ upn: 'priya@example.com', oid: 'user-object-id' })
+      .setProtectedHeader({ alg: 'RS256', kid })
+      .setIssuer(`https://sts.windows.net/${TENANT}/`)
+      .setAudience(`api://${CLIENT}`)
+      .setIssuedAt()
+      .setExpirationTime('1h')
+      .sign(signingKey);
+    expect((await verifyBearerToken(v1, TENANT, CLIENT, () => jwks)).actor).toBe('priya@example.com');
+
+    const v2 = await new SignJWT({ preferred_username: 'priya@example.com', oid: 'user-object-id' })
+      .setProtectedHeader({ alg: 'RS256', kid })
+      .setIssuer(ISSUER)
+      .setAudience(CLIENT)
+      .setIssuedAt()
+      .setExpirationTime('1h')
+      .sign(signingKey);
+    expect((await verifyBearerToken(v2, TENANT, CLIENT, () => jwks)).actor).toBe('priya@example.com');
+  });
+
+  it('refuses a v1-format token from a different tenant', async () => {
+    const token = await new SignJWT({ upn: 'x@example.com' })
+      .setProtectedHeader({ alg: 'RS256', kid })
+      .setIssuer('https://sts.windows.net/some-other-tenant/')
+      .setAudience(`api://${CLIENT}`)
+      .setIssuedAt()
+      .setExpirationTime('1h')
+      .sign(signingKey);
+    await expect(verifyBearerToken(token, TENANT, CLIENT, () => jwks)).rejects.toThrow(TokenError);
+  });
+
   it('refuses a token for a different tenant', async () => {
     const token = await new SignJWT({ preferred_username: 'x@example.com' })
       .setProtectedHeader({ alg: 'RS256', kid })

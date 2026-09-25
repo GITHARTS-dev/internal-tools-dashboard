@@ -1,4 +1,9 @@
-import { PublicClientApplication, InteractionRequiredAuthError, type Configuration } from '@azure/msal-browser';
+import {
+  CacheLookupPolicy,
+  PublicClientApplication,
+  InteractionRequiredAuthError,
+  type Configuration,
+} from '@azure/msal-browser';
 
 /**
  * Sign-in, entirely in the browser.
@@ -138,7 +143,16 @@ export async function getAccessToken(): Promise<string | null> {
   }
 
   try {
-    const result = await msalInstance.acquireTokenSilent({ scopes: apiScopes, account });
+    // Cache, then refresh token -- never MSAL's hidden-iframe fallback. That
+    // iframe loads this site, which staticwebapp.config.json forbids from
+    // being framed at all (`frame-ancestors 'none'`), so once the 24-hour SPA
+    // refresh token lapsed it only ever timed out. Stopping short of it makes
+    // an expired refresh token an InteractionRequiredAuthError, handled below.
+    const result = await msalInstance.acquireTokenSilent({
+      scopes: apiScopes,
+      account,
+      cacheLookupPolicy: CacheLookupPolicy.AccessTokenAndRefreshToken,
+    });
     return result.accessToken;
   } catch (error) {
     if (error instanceof InteractionRequiredAuthError) {

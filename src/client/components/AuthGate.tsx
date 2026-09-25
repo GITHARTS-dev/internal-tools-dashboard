@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { InteractionStatus } from '@azure/msal-browser';
 import { useIsAuthenticated, useMsal } from '@azure/msal-react';
 import { authConfigured, apiScopes, redirectError, redirectLock } from '../lib/msal';
 
@@ -25,20 +26,30 @@ import { authConfigured, apiScopes, redirectError, redirectLock } from '../lib/m
  * shown here rather than blindly redirecting straight back into the same
  * failure, which would either loop or (before this existed) leave the page
  * blank with the real reason sitting only in the console.
+ *
+ * Nothing happens until `inProgress` is `None`. MsalProvider starts every page
+ * load in `Startup`, and while it is there `useIsAuthenticated()` returns
+ * false *even for someone already signed in* -- it has not read the accounts
+ * out of the cache yet. Child effects also run before MsalProvider's own, so
+ * without this check the very first render always looks signed out and fires
+ * `loginRedirect()`. Entra still has a session, so it bounces straight back,
+ * the app briefly appears, and the next page load does the same thing: an
+ * endless sign-in loop for exactly the people who signed in successfully.
  */
 export function AuthGate({ children }: { children: React.ReactNode }) {
-  const { instance } = useMsal();
+  const { instance, inProgress } = useMsal();
   const isAuthenticated = useIsAuthenticated();
   const [error, setError] = useState<string | null>(redirectError);
 
   useEffect(() => {
-    if (!authConfigured || isAuthenticated || redirectLock.inFlight || error) return;
+    if (!authConfigured || isAuthenticated || inProgress !== InteractionStatus.None) return;
+    if (redirectLock.inFlight || error) return;
     redirectLock.inFlight = true;
     instance.loginRedirect({ scopes: apiScopes }).catch((e: unknown) => {
       redirectLock.inFlight = false;
       setError(e instanceof Error ? e.message : String(e));
     });
-  }, [instance, isAuthenticated, error]);
+  }, [instance, isAuthenticated, inProgress, error]);
 
   if (!authConfigured || isAuthenticated) return <>{children}</>;
 
@@ -65,7 +76,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', color: 'var(--text-secondary)' }}>
-      Redirecting to sign in…
+      {inProgress === InteractionStatus.Startup ? 'Signing in…' : 'Redirecting to sign in…'}
     </div>
   );
 }

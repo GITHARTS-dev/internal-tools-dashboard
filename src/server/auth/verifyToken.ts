@@ -19,6 +19,15 @@ import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
  * `jose` resolves the signing key from the JWKS itself, so there is no path
  * where a symmetric or `alg: none` token is accepted -- only the asymmetric
  * keys Entra actually publishes are ever candidates.
+ *
+ * Entra issues two token formats, and which one this API receives is set by
+ * the app registration (manifest `requestedAccessTokenVersion`, which is unset
+ * -- meaning v1 -- on a new registration), not by anything the SPA asks for:
+ *   - v1: iss `https://sts.windows.net/<tenant>/`, aud `api://<client-id>`
+ *   - v2: iss `https://login.microsoftonline.com/<tenant>/v2.0`, aud `<client-id>`
+ * Only accepting one exact issuer/audience pair meant every real token failed
+ * one check or the other. Both pairs name the same tenant and the same app,
+ * so accepting either is no looser than accepting one.
  */
 
 export interface AuthedUser {
@@ -51,8 +60,8 @@ export async function verifyBearerToken(
   let payload;
   try {
     ({ payload } = await jwtVerify(token, jwks(tenantId), {
-      issuer: `https://login.microsoftonline.com/${tenantId}/v2.0`,
-      audience: `api://${clientId}`,
+      issuer: [`https://login.microsoftonline.com/${tenantId}/v2.0`, `https://sts.windows.net/${tenantId}/`],
+      audience: [`api://${clientId}`, clientId],
       algorithms: ['RS256'],
     }));
   } catch (error) {

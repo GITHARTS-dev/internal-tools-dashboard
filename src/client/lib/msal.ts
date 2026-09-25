@@ -45,11 +45,36 @@ export const msalInstance = new PublicClientApplication(config);
 
 let initialized: Promise<void> | null = null;
 
-/** Call once, before rendering anything that might call the API. Safe to call more than once. */
+/**
+ * Set when the return trip from Entra itself carried an error -- a scope that
+ * was not consented to, a resource still propagating, the person cancelling.
+ * AuthGate reads this to show what went wrong instead of silently retrying
+ * `loginRedirect()` forever against the same failure.
+ */
+export let redirectError: string | null = null;
+
+/**
+ * Call once, before rendering anything that might call the API. Safe to call
+ * more than once.
+ *
+ * `handleRedirectPromise()` is the one call in this whole flow most likely to
+ * throw -- any error Entra sends back on the redirect (a bad scope, a denied
+ * consent, a stale request after the tab sat open past the code's lifetime)
+ * surfaces here as a rejection. This used to propagate out of this function,
+ * which is the top-level `await` in main.tsx: an unhandled rejection there
+ * means `createRoot(...).render(...)` never runs, and the page goes blank
+ * with nothing in it and no clue why -- the failure is real, but only visible
+ * in the console. It is caught here instead, so rendering always proceeds and
+ * AuthGate can show the actual message.
+ */
 export function ensureMsalInitialized(): Promise<void> {
   if (!initialized) {
     initialized = msalInstance.initialize().then(async () => {
-      await msalInstance.handleRedirectPromise();
+      try {
+        await msalInstance.handleRedirectPromise();
+      } catch (error) {
+        redirectError = error instanceof Error ? error.message : String(error);
+      }
       const accounts = msalInstance.getAllAccounts();
       if (accounts[0]) msalInstance.setActiveAccount(accounts[0]);
     });

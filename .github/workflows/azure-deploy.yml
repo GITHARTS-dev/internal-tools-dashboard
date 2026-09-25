@@ -29,12 +29,18 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-latest
     name: Build and deploy
+    # `secrets` cannot be read in an `if:` -- GitHub rejects the whole file as
+    # invalid, so every run fails before a single job starts. Copied into env
+    # here, it can be tested as `env.SWA_TOKEN` instead.
+    env:
+      SWA_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Not 20: vitest 5 requires Node 22 or later, so Test fails outright on 20.
+          node-version: 22
           cache: npm
 
       - run: npm ci
@@ -55,14 +61,14 @@ jobs:
         run: npm run build:azure
 
       - name: No Static Web App yet, skipping deploy
-        if: ${{ !secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        if: env.SWA_TOKEN == ''
         run: echo "AZURE_STATIC_WEB_APPS_API_TOKEN is not set -- tests and the build passed, deploy skipped. See DEPLOYMENT.md."
 
       - name: Deploy
-        if: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        if: env.SWA_TOKEN != ''
         uses: Azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          azure_static_web_apps_api_token: ${{ env.SWA_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
           app_location: dist/client
@@ -72,11 +78,14 @@ jobs:
           skip_api_build: true
 
   close-pr:
-    if: github.event_name == 'pull_request' && github.event.action == 'closed' && secrets.AZURE_STATIC_WEB_APPS_API_TOKEN != ''
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
     runs-on: ubuntu-latest
     name: Close preview environment
+    env:
+      SWA_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
     steps:
-      - uses: Azure/static-web-apps-deploy@v1
+      - if: env.SWA_TOKEN != ''
+        uses: Azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          azure_static_web_apps_api_token: ${{ env.SWA_TOKEN }}
           action: close

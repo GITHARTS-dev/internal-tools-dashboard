@@ -1,6 +1,21 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useIsAuthenticated, useMsal } from '@azure/msal-react';
 import { authConfigured, apiScopes, redirectError } from '../lib/msal';
+
+/**
+ * Whether a redirect has already been kicked off, module-level rather than a
+ * ref.
+ *
+ * React 18 StrictMode mounts every component, throws the mount away, then
+ * mounts it again -- on purpose, in development only, specifically to surface
+ * side-effect bugs like this one. A `useRef` guard does not survive that: the
+ * second mount gets a fresh ref, so `loginRedirect()` fired twice, the second
+ * call overwrote the PKCE state the first one was relying on, and Entra
+ * correctly refused the mismatched state that came back (`state_mismatch`).
+ * A module-level flag has no component instance to be thrown away, so it
+ * actually stops the second call.
+ */
+let redirecting = false;
 
 /**
  * Keeps the app off-screen until someone is signed in.
@@ -23,14 +38,13 @@ import { authConfigured, apiScopes, redirectError } from '../lib/msal';
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const { instance } = useMsal();
   const isAuthenticated = useIsAuthenticated();
-  const redirecting = useRef(false);
   const [error, setError] = useState<string | null>(redirectError);
 
   useEffect(() => {
-    if (!authConfigured || isAuthenticated || redirecting.current || error) return;
-    redirecting.current = true;
+    if (!authConfigured || isAuthenticated || redirecting || error) return;
+    redirecting = true;
     instance.loginRedirect({ scopes: apiScopes }).catch((e: unknown) => {
-      redirecting.current = false;
+      redirecting = false;
       setError(e instanceof Error ? e.message : String(e));
     });
   }, [instance, isAuthenticated, error]);
@@ -48,7 +62,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             className="btn primary"
             onClick={() => {
               setError(null);
-              redirecting.current = false;
+              redirecting = false;
             }}
           >
             Try again

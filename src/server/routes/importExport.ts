@@ -2,13 +2,13 @@ import { Hono } from 'hono';
 import { parseCsv, toCsv } from '../../shared/csv';
 import { toolCreateSchema } from '../../shared/schema';
 import { toDecimalString, parseMoneyInput } from '../../shared/money';
-import type { Env } from '../context';
+import type { Env, Variables } from '../context';
 import { actor, db, zodErrorResponse } from '../context';
 import { createTool, listAllTools, listTools, updateTool } from '../repo/tools';
 import { listPayments } from '../repo/payments';
 import { recordAudit } from '../repo/audit';
 
-export const importExportRoutes = new Hono<{ Bindings: Env }>();
+export const importExportRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 /** The canonical column set: what export writes and what import expects. */
 export const TOOL_CSV_COLUMNS = [

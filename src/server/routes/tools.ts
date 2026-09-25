@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { toolCreateSchema, toolUpdateSchema, paymentCreateSchema } from '../../shared/schema';
 import { advanceByCycle, todayInTimezone } from '../../shared/dates';
-import type { Env } from '../context';
+import type { Env, Variables } from '../context';
 import { actor, db, featureDocuments, patchFrom, zodErrorResponse } from '../context';
 import {
   archiveTool,
@@ -25,7 +25,7 @@ import { listDocuments } from '../repo/documents';
 import { getSettings } from '../repo/settings';
 import type { ToolStatus } from '../../shared/types';
 
-export const toolsRoutes = new Hono<{ Bindings: Env }>();
+export const toolsRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 toolsRoutes.get('/', async (c) => {
   const url = new URL(c.req.url);

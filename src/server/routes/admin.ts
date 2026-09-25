@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { settingsUpdateSchema } from '../../shared/schema';
 import { isIsoDate, todayInTimezone } from '../../shared/dates';
 import type { Alert } from '../../shared/types';
-import type { AppContext, Env } from '../context';
+import type { AppContext, Env, Variables } from '../context';
 import { actor, db, envVars, featureDocuments, zodErrorResponse } from '../context';
 import { clearAllData, dataStatus, loadDemoData, removeDemoData } from '../repo/demo';
 import { getSettings, updateSettings } from '../repo/settings';
@@ -14,7 +14,7 @@ import { refreshRatesIfDue } from '../fx/refresh';
 import { importAwsCostsIfDue } from '../aws/import';
 import { DEFAULT_CHANNELS } from '../reminders';
 
-export const adminRoutes = new Hono<{ Bindings: Env }>();
+export const adminRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 adminRoutes.get('/settings', async (c) => {
   const settings = await getSettings(db(c));

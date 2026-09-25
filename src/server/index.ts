@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
-import type { Env } from './context';
+import type { Env, Variables } from './context';
+import { requireAuth } from './auth/middleware';
 import { toolsRoutes } from './routes/tools';
 import { paymentsRoutes } from './routes/payments';
 import { dashboardRoutes } from './routes/dashboard';
@@ -17,9 +18,17 @@ import { awsRoutes } from './routes/aws';
  * adapters beside it (azure.ts for production, dev.ts for local work) know
  * nothing about the routes. Static assets are served by Static Web Apps, not
  * from here.
+ *
+ * There is no platform-managed sign-in gating requests before they get here
+ * any more -- the SPA runs its own PKCE flow with MSAL and sends a bearer
+ * token, so `requireAuth()` is what actually stands between a request and the
+ * routes below. See auth/middleware.ts for exactly what it checks and the two
+ * paths it deliberately leaves open.
  */
 
-export const app = new Hono<{ Bindings: Env }>();
+export const app = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+app.use('/api/*', requireAuth());
 
 app.get('/api/health', (c) =>
   c.json({ ok: true, env: c.env.APP_ENV ?? 'unknown', time: new Date().toISOString() }),

@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { Env } from '../context';
+import type { Env, Variables } from '../context';
 import { actor, db, patchFrom, zodErrorResponse } from '../context';
 import {
   internalProductCreateSchema,
@@ -34,7 +34,7 @@ import { listAllTools } from '../repo/tools';
 import { listPayments } from '../repo/payments';
 import { todayInTimezone } from '../../shared/dates';
 
-export const internalProductRoutes = new Hono<{ Bindings: Env }>();
+export const internalProductRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 internalProductRoutes.get('/internal-products', async (c) => {
   const [products, counts] = await Promise.all([

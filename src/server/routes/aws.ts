@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { Env } from '../context';
+import type { Env, Variables } from '../context';
 import { actor, db, envVars } from '../context';
 import { addMonthsToYearMonth, isYearMonth } from '../../shared/fx';
 import { lastCompleteMonth } from '../../shared/productCosts';
@@ -9,7 +9,7 @@ import { recordAudit } from '../repo/audit';
 import { awsConfig, importAwsCosts } from '../aws/import';
 import { AwsError } from '../aws/costExplorer';
 
-export const awsRoutes = new Hono<{ Bindings: Env }>();
+export const awsRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 /** Whether the import can run, and if not, exactly what it is waiting for. */
 awsRoutes.get('/aws/status', async (c) => {

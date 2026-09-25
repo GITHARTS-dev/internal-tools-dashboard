@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { documentCreateSchema } from '../../shared/schema';
-import type { Env } from '../context';
+import type { Env, Variables } from '../context';
 import { actor, db, featureDocuments, zodErrorResponse } from '../context';
 import { createDocument, deleteDocument, listDocuments } from '../repo/documents';
 import { recordAudit } from '../repo/audit';
@@ -12,7 +12,7 @@ import { recordAudit } from '../repo/audit';
  * at all or only their amounts recorded. With the flag off these endpoints
  * answer 404, so nothing half-built is reachable.
  */
-export const documentsRoutes = new Hono<{ Bindings: Env }>();
+export const documentsRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 documentsRoutes.use('*', async (c, next) => {
   if (!featureDocuments(c)) {

@@ -8,7 +8,7 @@ import {
 } from '../../shared/metrics';
 import { todayInTimezone } from '../../shared/dates';
 import { isIsoDate } from '../../shared/dates';
-import type { Env } from '../context';
+import type { Env, Variables } from '../context';
 import { db } from '../context';
 import { listAllTools } from '../repo/tools';
 import { listPayments, paidTotalsByTool } from '../repo/payments';
@@ -17,7 +17,7 @@ import { listAllProductCosts } from '../repo/productCosts';
 import { getSettings } from '../repo/settings';
 import { listRecentAudit } from '../repo/audit';
 
-export const dashboardRoutes = new Hono<{ Bindings: Env }>();
+export const dashboardRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 /**
  * Everything the dashboard renders, in one request.

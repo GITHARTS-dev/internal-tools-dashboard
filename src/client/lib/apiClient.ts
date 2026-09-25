@@ -1,4 +1,5 @@
 import { ApiError } from './errors';
+import { authConfigured, getAccessToken } from './msal';
 import type {
   Alert,
   AppSettings,
@@ -19,12 +20,25 @@ import type { FxRate } from '../../shared/fx';
 import type { ProductUsage } from '../../shared/productCosts';
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  // Unset locally (no Entra app registration configured yet): every call goes
+  // out with no Authorization header, matching the server's own requireAuth()
+  // being inert under the same condition. Configured: a token is fetched
+  // before every request, since MSAL's cached one can expire between calls.
+  const token = authConfigured ? await getAccessToken() : null;
+  if (authConfigured && token === null) {
+    // getAccessToken() started a sign-in redirect and the browser is about to
+    // navigate away. Hang instead of letting this call fail and flash a
+    // spurious "unauthorized" error in the instant before that happens.
+    return new Promise<T>(() => {});
+  }
+
   const response = await fetch(`/api${path}`, {
     ...init,
     headers: {
       ...(init.body && typeof init.body === 'string' && !init.headers
         ? { 'content-type': 'application/json' }
         : {}),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...init.headers,
     },
   });

@@ -13,7 +13,8 @@ GitHub push
       └─ Hono API     →  SWA managed Functions        (free, included)
                               └─ Supabase Postgres    (free)
 
-Sign-in:   SWA built-in auth, Entra ID — free, no domain required
+Sign-in:   MSAL in the browser (PKCE, no client secret) + the API verifies
+           the resulting token itself — free, no domain required
 Reminders: a scheduled GitHub Actions workflow calls POST /api/reminders/run
 ```
 
@@ -84,27 +85,54 @@ discovering when reminders go quiet.
 
 ## 2. Entra app registration
 
-This is what restricts sign-in to your company. Without it, Static Web Apps'
-pre-configured Entra provider accepts **any** Microsoft account, which is not
-what you want in front of company spend.
+This is what restricts sign-in to your company, and it is what the app
+actually signs into: there is no client secret anywhere in this setup. The
+browser runs the sign-in itself (MSAL, Authorization Code + PKCE) and the API
+checks the resulting token's signature, tenant and audience on every request
+(`src/server/auth/`). Nothing sits in front of it doing that for you.
 
 Portal → **Microsoft Entra ID → App registrations → New registration**:
 
 - Name: `Tools dashboard`
 - Supported account types: **Accounts in this organizational directory only**
-- Redirect URI: **Web** → `https://<your-site>.azurestaticapps.net/.auth/login/aad/callback`
+- Redirect URI: leave blank for now — added below once the platform type is
+  set correctly, and again once you know the site's hostname.
 
-You will not know the hostname until after the first deploy, so either deploy
-once first, or come back and add the redirect URI afterwards.
+After it's created:
 
-Then:
-1. **Certificates & secrets → New client secret.** Copy the *value* immediately;
-   it is never shown again.
-2. Note the **Application (client) ID** and the **Directory (tenant) ID** from
-   the Overview page.
-3. In [staticwebapp.config.json](staticwebapp.config.json), replace
-   `AAD_TENANT_ID_PLACEHOLDER` with the tenant ID. It is in the issuer URL, not
-   a secret, so it belongs in the committed file.
+1. **Authentication → Add a platform → Single-page application.** This is the
+   step that matters: it is what tells Entra to allow the PKCE flow without a
+   secret. Do **not** pick "Web" — that platform type expects a client secret
+   and PKCE-only sign-in will be refused.
+   - Redirect URI: `https://<your-site>.azurestaticapps.net/` (root path, not
+     a callback path — MSAL handles the response on whatever page it left
+     from). You will not know the hostname until the first deploy; come back
+     and add it once you do. For now, also add `http://localhost:5173/` here,
+     so local development can sign in the same way.
+2. **Expose an API → Add**. Accept the default **Application ID URI**
+   (`api://<client-id>`) → **Save**.
+3. Still on **Expose an API → Add a scope**:
+   - Scope name: `access_as_user`
+   - Who can consent: **Admins and users**
+   - Give it any admin/user consent display name and description — e.g. "Use
+     the tools dashboard API" / "Lets the app read and update your company's
+     tools, payments and product costs on your behalf."
+4. Note the **Application (client) ID** and the **Directory (tenant) ID** from
+   the Overview page. Neither is secret — they identify the app, the same way
+   a URL does, and both end up baked into the built JavaScript regardless.
+   There is no client secret to create.
+
+### Restricting sign-in to specific people
+
+Single-tenant sign-in (above) lets anyone with a company account in. If only a
+handful of named people should actually use this:
+
+1. **Entra ID → Enterprise applications** → find "Tools dashboard".
+2. **Properties → Assignment required?** → **Yes**.
+3. **Users and groups → Add user/group** → add each person by name.
+
+Now only those people can sign in — everyone else is refused at Microsoft's
+own login screen, the same as someone outside the company entirely.
 
 ---
 
@@ -131,13 +159,16 @@ Copy the **deployment token** (Overview → Manage deployment token).
 | Name | Value |
 |---|---|
 | `DATABASE_URL` | Supabase **transaction pooler** URI, port **6543** |
+| `AAD_TENANT_ID` | Directory (tenant) ID |
 | `AAD_CLIENT_ID` | Application (client) ID |
-| `AAD_CLIENT_SECRET` | The client secret value |
 | `REMINDER_TOKEN` | A long random string you generate |
 | `TEAMS_WEBHOOK_URL` | From step 5 (optional; can also live in Settings) |
 | `AWS_ACCESS_KEY_ID` | From step 6 |
 | `AWS_SECRET_ACCESS_KEY` | From step 6 |
 | `APP_ENV` | `production` |
+
+This is what the API uses to verify a request's token — the tenant and client
+ID it should match, nothing more. There is no `AAD_CLIENT_SECRET` to set.
 
 Generate the reminder token with:
 
@@ -148,15 +179,25 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 `APP_ENV=production` is not decorative: it disables the endpoints that wipe or
 reload demo data.
 
-### GitHub repository secrets
+### GitHub repository secrets and variables
 
-**Repo → Settings → Secrets and variables → Actions:**
+**Repo → Settings → Secrets and variables → Actions**, split across two tabs:
+
+**Secrets** tab:
 
 | Secret | Value |
 |---|---|
 | `AZURE_STATIC_WEB_APPS_API_TOKEN` | The deployment token |
 | `APP_URL` | `https://<your-site>.azurestaticapps.net` |
 | `REMINDER_TOKEN` | The same string as above |
+
+**Variables** tab (not secret — these get baked into the built JavaScript, so
+there would be no point hiding them):
+
+| Variable | Value |
+|---|---|
+| `AAD_CLIENT_ID` | Application (client) ID, same value as above |
+| `AAD_TENANT_ID` | Directory (tenant) ID, same value as above |
 
 ---
 
@@ -171,30 +212,36 @@ to turn deployment on; the workflow file does not need touching again.
 Push to the deployment branch, or run the workflow by hand from the Actions tab.
 It runs `npm test` first, so a broken build does not reach production.
 
-Then check it by signing in and opening this in the browser:
+Then check it:
 
+```bash
+curl https://<your-site>.azurestaticapps.net/api/health
 ```
-https://<your-site>.azurestaticapps.net/api/health
-```
 
-It should show `"ok": true`. A plain `curl` gets a redirect to the sign-in
-page instead, because the API sits behind the Entra rule like everything else.
+This one works with a plain `curl` and no sign-in — it is one of the two routes
+`requireAuth()` deliberately leaves open (`src/server/auth/middleware.ts`), so
+it is a check of the deploy itself, not of sign-in. It should show `"ok": true`.
 
-Two things are worth verifying deliberately:
+Two things are worth verifying deliberately, in the browser:
 
-1. **Open the site in a private window.** You should be redirected to a
-   Microsoft sign-in. If you get the app instead, auth is not applied — stop and
-   fix it before entering real data.
-2. **Try an account outside your tenant**, if you have one. It should be
-   refused. If it is let in, the app registration is multi-tenant.
+1. **Open the site in a private window.** You should briefly see "Redirecting
+   to sign in…" and then land on a Microsoft sign-in page. If the app's pages
+   render instead, sign-in is not wired up — check `VITE_AAD_CLIENT_ID` /
+   `VITE_AAD_TENANT_ID` were actually set when the build ran (a GitHub Actions
+   repo **variable**, not secret — easy to add to the wrong tab).
+2. **Try an account that shouldn't get in** — outside your tenant, or one of
+   your own not in the assigned-users list if you set that up in step 2. It
+   should be refused at Microsoft's own screen. If it gets through, check the
+   app registration's account type, or the assignment-required setting.
 
 Seed the exchange rates once, signed in as yourself: **Settings → Exchange rates
 → Fetch rates now**. They are refreshed daily after that.
 
-(You cannot `curl` this one. `/api/fx/refresh` sits behind the Entra sign-in like
-everything else; the reminder token only opens `/api/reminders/run`. That route
-also fetches a 24-month backfill on its first run when no rates are stored, so
-running the reminder workflow once does the same job.)
+(You cannot `curl` this one, or most other routes — they all require a valid
+access token now, which only the signed-in browser has. The reminder token
+only opens `/api/reminders/run`. That route also fetches a 24-month backfill on
+its first run when no rates are stored, so running the reminder workflow once
+does the same job.)
 
 ---
 
@@ -411,16 +458,18 @@ history, so the common "undo" is a status change, not a restore.
 
 - [ ] Supabase project created, password saved
 - [ ] `npm run migrate:pg` against the **direct** URI (5432) succeeds
-- [ ] Entra app registration, single-tenant, secret copied
-- [ ] Tenant ID pasted into `staticwebapp.config.json`
+- [ ] Entra app registration, single-tenant, redirect platform is **Single-page application** (not Web — no secret should exist)
+- [ ] "Expose an API" has an Application ID URI and the `access_as_user` scope
+- [ ] (Optional) Assignment required = Yes, the specific people added, if sign-in should be limited to them
 - [ ] Static Web App created on the **Free** plan, deployment token copied
 - [ ] Azure-generated workflow deleted, this repo's kept
-- [ ] SWA environment variables set (`DATABASE_URL` on the **pooler**, 6543)
-- [ ] GitHub secrets set (`AZURE_STATIC_WEB_APPS_API_TOKEN`, `APP_URL`, `REMINDER_TOKEN`)
-- [ ] Deploy green, `/api/health` responds
-- [ ] Redirect URI added to the app registration
-- [ ] **Private window redirects to sign-in** — not straight into the app
-- [ ] An account outside the tenant is refused
+- [ ] SWA environment variables set (`DATABASE_URL` on the **pooler** 6543, `AAD_TENANT_ID`, `AAD_CLIENT_ID`)
+- [ ] GitHub **secrets** set (`AZURE_STATIC_WEB_APPS_API_TOKEN`, `APP_URL`, `REMINDER_TOKEN`)
+- [ ] GitHub **variables** set (`AAD_CLIENT_ID`, `AAD_TENANT_ID`) — the Variables tab, not Secrets
+- [ ] Deploy green, `curl .../api/health` responds with no sign-in needed
+- [ ] Redirect URI (the site's real hostname) added to the SPA platform in the app registration
+- [ ] **Private window shows "Redirecting to sign in…" then Microsoft's login** — not the app's pages directly
+- [ ] An account that shouldn't get in (outside the tenant, or not in the assigned list) is refused
 - [ ] Settings → Exchange rates → **Fetch rates now** pressed once
 - [ ] Teams workflow built, one post-to-chat step per person, trigger set to **Anyone**
 - [ ] Webhook URL set, **Send test** reaches both people

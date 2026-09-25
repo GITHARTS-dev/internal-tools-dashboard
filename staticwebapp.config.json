@@ -2,45 +2,19 @@
   "$schema": "https://json.schemastore.org/staticwebapp.config.json",
 
   "routes": [
-    {
-      "route": "/api/reminders/run",
-      "allowedRoles": ["anonymous"],
-      "methods": ["POST"]
-    },
-    { "route": "/.auth/login/github", "statusCode": 404 },
-    { "route": "/.auth/login/twitter", "statusCode": 404 },
-    { "route": "/api/*", "allowedRoles": ["authenticated"] },
-    { "route": "/*", "allowedRoles": ["authenticated"] }
+    { "route": "/*", "allowedRoles": ["anonymous"] }
   ],
-
-  "responseOverrides": {
-    "401": { "statusCode": 302, "redirect": "/.auth/login/aad" },
-    "403": { "statusCode": 302, "redirect": "/.auth/login/aad" }
-  },
 
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": ["/assets/*", "/*.png", "/*.svg", "/*.ico", "/api/*"]
   },
 
-  "auth": {
-    "identityProviders": {
-      "azureActiveDirectory": {
-        "userDetailsClaim": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
-        "registration": {
-          "openIdIssuer": "https://login.microsoftonline.com/AAD_TENANT_ID_PLACEHOLDER/v2.0",
-          "clientIdSettingName": "AAD_CLIENT_ID",
-          "clientSecretSettingName": "AAD_CLIENT_SECRET"
-        }
-      }
-    }
-  },
-
   "globalHeaders": {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin",
-    "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://login.microsoftonline.com; frame-src https://login.microsoftonline.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
   },
 
   "platform": { "apiRuntime": "node:20" }

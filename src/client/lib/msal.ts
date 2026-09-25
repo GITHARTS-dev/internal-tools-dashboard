@@ -66,12 +66,22 @@ export let redirectError: string | null = null;
  * with nothing in it and no clue why -- the failure is real, but only visible
  * in the console. It is caught here instead, so rendering always proceeds and
  * AuthGate can show the actual message.
+ *
+ * `navigateToLoginRequestUrl: false` -- MSAL's default (true) does a second
+ * navigation after processing the redirect response, back to whatever page
+ * was active when `loginRedirect()` was called, if that differs from
+ * `redirectUri`. AuthGate can call `loginRedirect()` from any route (it wraps
+ * the whole app, not just "/"), so that second navigation is a real
+ * possibility here, not a hypothetical -- and it is one more moving part than
+ * this app needs. React Router already owns "what page is this," so there is
+ * nothing for MSAL to bounce back to: landing on `redirectUri` ("/") is
+ * always fine.
  */
 export function ensureMsalInitialized(): Promise<void> {
   if (!initialized) {
     initialized = msalInstance.initialize().then(async () => {
       try {
-        await msalInstance.handleRedirectPromise();
+        await msalInstance.handleRedirectPromise({ navigateToLoginRequestUrl: false });
       } catch (error) {
         redirectError = error instanceof Error ? error.message : String(error);
       }

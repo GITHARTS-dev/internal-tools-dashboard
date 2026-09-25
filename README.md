@@ -74,7 +74,7 @@ queries the database, which should keep it awake.
 
 ```
 Browser ──► Static Web Apps ──┬── React SPA (static files)
-            (Entra sign-in)   └── /api/* ──► Azure Function
+  (MSAL: PKCE, no secret)     └── /api/* ──► Azure Function, checks the token
                                              └── Hono API ──► Postgres
 
 GitHub Actions (daily) ──► POST /api/reminders/run ──► console / Teams / email
@@ -148,6 +148,7 @@ Nothing secret belongs in a committed file.
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | Supabase connection string. Unset locally, which selects SQLite. |
+| `AAD_TENANT_ID` / `AAD_CLIENT_ID` | The Entra app registration the API checks tokens against. Also needed at *build* time, as `VITE_AAD_TENANT_ID` / `VITE_AAD_CLIENT_ID`, so the browser knows where to sign in. Unset (either half): sign-in is skipped entirely, which is normal locally and wrong in production. Not secret -- no `AAD_CLIENT_SECRET` exists, because there is no client secret in this design. |
 | `REMINDER_TOKEN` | Shared secret for `POST /api/reminders/run`, the one endpoint a machine calls. Inert when unset. |
 | `APP_ENV` | `production` disables the demo-data controls. |
 | `FEATURE_DOCUMENTS` | `true` enables contract/invoice records. Off by default -- invoices are not tracked for now; a payment's invoice reference and URL are plain optional text regardless of this flag. |
@@ -234,15 +235,20 @@ The shape:
   The API is a managed Azure Function on the free tier — no separate resource.
 - **Database** is Supabase Postgres. Migrations run from your machine against
   the direct connection; the app uses the transaction pooler.
-- **Sign-in** is Static Web Apps' built-in Entra auth, applied to the static
-  files and the API alike. It is free and needs no custom domain.
+- **Sign-in** is MSAL in the browser, not a platform feature: the SPA runs the
+  Authorization Code + PKCE flow directly against Entra as a public client, so
+  no client secret exists anywhere. The API verifies the resulting access
+  token itself on every request (`src/server/auth/`) -- signature, tenant and
+  audience -- which is what actually stands between a request and the data,
+  now that nothing upstream is gating it. It is free and needs no custom
+  domain.
 - **Reminders** fire from a scheduled GitHub Actions workflow, because managed
   Functions are HTTP-only and have no timer trigger.
 
-The app has no access control of its own, so the sign-in must be in place before
-real data goes in. `src/server/context.ts` has a single `actor()` function that
-every audit row already flows through; wiring the signed-in identity into it is
-a one-function change.
+`src/server/context.ts`'s `actor()` reads the verified identity the auth
+middleware attaches to the request, so every audit row is already attributed
+to a real person, not a trusted header -- that header is only consulted when
+sign-in is unconfigured (local development).
 
 ## Layout
 

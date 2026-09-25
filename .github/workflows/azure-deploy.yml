@@ -45,6 +45,13 @@ jobs:
         run: npm test
 
       - name: Build client and API
+        env:
+          # Baked into the built JS bundle, not secret -- the client ID and
+          # tenant ID are public identifiers, the same as any request MSAL
+          # makes already reveals them. Repo -> Settings -> Secrets and
+          # variables -> Actions -> Variables tab (not Secrets).
+          VITE_AAD_CLIENT_ID: ${{ vars.AAD_CLIENT_ID }}
+          VITE_AAD_TENANT_ID: ${{ vars.AAD_TENANT_ID }}
         run: npm run build:azure
 
       - name: No Static Web App yet, skipping deploy

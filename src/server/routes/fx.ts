@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { Env } from '../context';
+import type { Env, Variables } from '../context';
 import { actor, db, zodErrorResponse } from '../context';
 import { isYearMonth, monthOf, addMonthsToYearMonth, parseRate } from '../../shared/fx';
 import { fetchEcbRates, FxFetchError } from '../fx/ecb';
@@ -9,7 +9,7 @@ import { getSettings } from '../repo/settings';
 import { recordAudit } from '../repo/audit';
 import { todayInTimezone } from '../../shared/dates';
 
-export const fxRoutes = new Hono<{ Bindings: Env }>();
+export const fxRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 fxRoutes.get('/fx/status', async (c) => {
   const settings = await getSettings(db(c));

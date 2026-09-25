@@ -8,10 +8,19 @@ export interface Env {
   APP_ENV?: string;
   TEAMS_WEBHOOK_URL?: string;
   EMAIL_PROVIDER?: string;
+  /** The Entra tenant and app registration the SPA signs into. Unset: no token is required (see auth/middleware.ts). */
+  AAD_TENANT_ID?: string;
+  AAD_CLIENT_ID?: string;
   [key: string]: unknown;
 }
 
-export type AppContext = Context<{ Bindings: Env }>;
+/** Set by `requireAuth()` (auth/middleware.ts) once a bearer token verifies. */
+export interface Variables {
+  actor?: string;
+  actorOid?: string;
+}
+
+export type AppContext = Context<{ Bindings: Env; Variables: Variables }>;
 
 export function db(c: AppContext): Db {
   return c.env.DB;
@@ -20,11 +29,16 @@ export function db(c: AppContext): Db {
 /**
  * Who is making this change, for the audit log.
  *
- * There is no authentication yet, so this trusts a header and falls back to
- * 'web'. When sign-in is added, this is the single place that changes -- every
- * audit row already flows through it.
+ * The verified identity from the access token wins whenever one exists --
+ * `requireAuth()` puts it here after checking the token's signature, issuer
+ * and audience, so it cannot be spoofed by the caller. The `x-actor` header is
+ * the fallback for local development and tests, where `AAD_TENANT_ID` /
+ * `AAD_CLIENT_ID` are unset and no token is required in the first place; it is
+ * never consulted once sign-in is actually configured.
  */
 export function actor(c: AppContext): string {
+  const verified = c.get('actor');
+  if (verified) return verified;
   const header = c.req.header('x-actor');
   return header?.trim().slice(0, 120) || 'web';
 }

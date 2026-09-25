@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { markPaidSchema, paymentUpdateSchema } from '../../shared/schema';
 import { todayInTimezone } from '../../shared/dates';
-import type { Env } from '../context';
+import type { Env, Variables } from '../context';
 import { actor, db, patchFrom, zodErrorResponse } from '../context';
 import {
   deletePayment,
@@ -15,7 +15,7 @@ import { diffRecords, recordAudit } from '../repo/audit';
 import { getSettings } from '../repo/settings';
 import type { PaymentStatus } from '../../shared/types';
 
-export const paymentsRoutes = new Hono<{ Bindings: Env }>();
+export const paymentsRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 /**
  * The ledger view. Tool names come back alongside the rows so the client does

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { useMsal } from '@azure/msal-react';
 import { ToastProvider } from './components/ui';
+import { AuthGate } from './components/AuthGate';
+import { authConfigured } from './lib/msal';
 import { formatDate } from '../shared/dates';
 import { api } from './lib/api';
 import Dashboard from './pages/Dashboard';
@@ -61,6 +64,8 @@ const TITLES: Array<[RegExp, string, string]> = [
 
 export default function App() {
   const { theme, apply } = useTheme();
+  const { instance, accounts } = useMsal();
+  const signedInAs = authConfigured ? accounts[0]?.username : null;
   const location = useLocation();
   const [attention, setAttention] = useState<number>(0);
   const [asAt, setAsAt] = useState<string>('');
@@ -96,6 +101,7 @@ export default function App() {
 
   return (
     <ToastProvider>
+      <AuthGate>
       <div className="aurora" aria-hidden="true">
         <i />
         <i />
@@ -140,6 +146,16 @@ export default function App() {
           </nav>
 
           <div className="topbar-meta">
+            {signedInAs ? (
+              <button
+                type="button"
+                className="btn sm subtle"
+                title={signedInAs}
+                onClick={() => instance.logoutRedirect()}
+              >
+                Sign out
+              </button>
+            ) : null}
             <div className="seg" role="group" aria-label="Colour theme">
               {(['system', 'light', 'dark'] as const).map((option) => (
                 <button
@@ -198,6 +214,7 @@ export default function App() {
           </Routes>
         </main>
       </div>
+      </AuthGate>
     </ToastProvider>
   );
 }

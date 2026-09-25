@@ -1,21 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useIsAuthenticated, useMsal } from '@azure/msal-react';
-import { authConfigured, apiScopes, redirectError } from '../lib/msal';
-
-/**
- * Whether a redirect has already been kicked off, module-level rather than a
- * ref.
- *
- * React 18 StrictMode mounts every component, throws the mount away, then
- * mounts it again -- on purpose, in development only, specifically to surface
- * side-effect bugs like this one. A `useRef` guard does not survive that: the
- * second mount gets a fresh ref, so `loginRedirect()` fired twice, the second
- * call overwrote the PKCE state the first one was relying on, and Entra
- * correctly refused the mismatched state that came back (`state_mismatch`).
- * A module-level flag has no component instance to be thrown away, so it
- * actually stops the second call.
- */
-let redirecting = false;
+import { authConfigured, apiScopes, redirectError, redirectLock } from '../lib/msal';
 
 /**
  * Keeps the app off-screen until someone is signed in.
@@ -29,6 +14,12 @@ let redirecting = false;
  * boundary. The actual enforcement is the API refusing an unauthenticated
  * request either way, so a bug here fails closed, not open.
  *
+ * `redirectLock` (lib/msal.ts) is shared with `getAccessToken()`, which is
+ * the other place this app can call `loginRedirect()`/`acquireTokenRedirect()`
+ * from. Two independent call sites each guarding only themselves is not the
+ * same as one guard that actually stops a second redirect firing while the
+ * first is still in flight -- see that file for the full story.
+ *
  * The redirect itself can come back carrying an error instead of a token --
  * a scope not yet propagated, a denied consent, a stale request. That is
  * shown here rather than blindly redirecting straight back into the same
@@ -41,10 +32,10 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(redirectError);
 
   useEffect(() => {
-    if (!authConfigured || isAuthenticated || redirecting || error) return;
-    redirecting = true;
+    if (!authConfigured || isAuthenticated || redirectLock.inFlight || error) return;
+    redirectLock.inFlight = true;
     instance.loginRedirect({ scopes: apiScopes }).catch((e: unknown) => {
-      redirecting = false;
+      redirectLock.inFlight = false;
       setError(e instanceof Error ? e.message : String(e));
     });
   }, [instance, isAuthenticated, error]);
@@ -62,7 +53,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             className="btn primary"
             onClick={() => {
               setError(null);
-              redirecting = false;
+              redirectLock.inFlight = false;
             }}
           >
             Try again

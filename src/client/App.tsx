@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
-import { useMsal } from '@azure/msal-react';
+import { useIsAuthenticated, useMsal } from '@azure/msal-react';
 import { ToastProvider } from './components/ui';
 import { AuthGate } from './components/AuthGate';
 import { authConfigured } from './lib/msal';
@@ -65,6 +65,7 @@ const TITLES: Array<[RegExp, string, string]> = [
 export default function App() {
   const { theme, apply } = useTheme();
   const { instance, accounts } = useMsal();
+  const isAuthenticated = useIsAuthenticated();
   const signedInAs = authConfigured ? accounts[0]?.username : null;
   const location = useLocation();
   const [attention, setAttention] = useState<number>(0);
@@ -72,7 +73,19 @@ export default function App() {
 
   // The sidebar badge is the one number people look at without clicking in,
   // so it refreshes on every navigation rather than only on first load.
+  //
+  // This effect lives in App, not inside AuthGate's children, so it is NOT
+  // covered by AuthGate deciding whether to render the real app yet -- it
+  // would otherwise fire api.dashboard() (and so getAccessToken()) the
+  // instant App mounts, in parallel with AuthGate's own sign-in check, before
+  // anyone is actually signed in. Two independent call sites each trying to
+  // redirect at once raced on the same browser-storage request state, which
+  // is what an earlier version of this bug looked like from the outside: the
+  // app "coming and going" on a loop. Skipping the fetch outright while
+  // unauthenticated removes the second call site rather than just making its
+  // redirect safer.
   useEffect(() => {
+    if (authConfigured && !isAuthenticated) return;
     let cancelled = false;
     api
       .dashboard()
@@ -91,7 +104,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [location.pathname]);
+  }, [location.pathname, isAuthenticated]);
 
   const [title, subtitle] = (TITLES.find(([pattern]) => pattern.test(location.pathname)) ?? [
     null,

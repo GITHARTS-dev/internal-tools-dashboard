@@ -83,20 +83,31 @@ export function ensureMsalInitialized(): Promise<void> {
 }
 
 /**
- * Guards the two branches below against firing more than once. The dashboard
- * fires several API calls at once on load (the page's own data, the sidebar
- * badge count, ...), and every one of them calls this function. The first
- * time a token for the current scope is not already cached -- the moment
- * right after signing in, before anything has been silently renewed yet --
- * every one of those concurrent calls would independently start its own
- * redirect, each overwriting the PKCE request state the last one just wrote,
- * so whichever navigation actually won the race came back to a state that no
- * longer matched (`state_mismatch`), which read as the app "coming and going"
- * on a loop. Only the first caller may actually redirect; the same guard as
- * AuthGate's, for the same StrictMode reason: module scope, not a ref or a
- * component-local variable.
+ * Guards every place in this app that can call `loginRedirect()` or
+ * `acquireTokenRedirect()` -- currently this file's own `getAccessToken()`
+ * and AuthGate's initial sign-in check -- against firing more than one of
+ * them at once.
+ *
+ * Those two call sites are genuinely independent: AuthGate decides whether to
+ * kick off sign-in at all, while `getAccessToken()` is called by every API
+ * request the app makes, including ones that fire from places AuthGate does
+ * not control (App.tsx's own sidebar-badge effect used to be one, until it
+ * was taught to wait for sign-in too). Each redirect writes its own PKCE
+ * request state to browser storage; two in flight at once means the second
+ * overwrites the first's, and whichever navigation actually completes comes
+ * back to a state that no longer matches -- `state_mismatch`, which reads
+ * from the outside as the app "coming and going" on a loop. One shared,
+ * module-level lock (not a ref or a component-local variable -- React 18
+ * StrictMode discards and remounts components once in development, which a
+ * ref does not survive) is what makes "only the first caller redirects" true
+ * across every call site, not just within one of them.
+ *
+ * A plain object, not an exported `let`: an imported binding is a read-only
+ * view of the exporting module's variable, so another file could read
+ * `redirectInFlight` but not set it. A mutable field on an exported object
+ * has no such restriction.
  */
-let redirectInFlight = false;
+export const redirectLock = { inFlight: false };
 
 /**
  * An access token for the API, or `null` if nobody is signed in yet.
@@ -109,8 +120,8 @@ let redirectInFlight = false;
 export async function getAccessToken(): Promise<string | null> {
   const account = msalInstance.getActiveAccount() ?? msalInstance.getAllAccounts()[0];
   if (!account) {
-    if (!redirectInFlight) {
-      redirectInFlight = true;
+    if (!redirectLock.inFlight) {
+      redirectLock.inFlight = true;
       await msalInstance.loginRedirect({ scopes: apiScopes });
     }
     return null;
@@ -121,8 +132,8 @@ export async function getAccessToken(): Promise<string | null> {
     return result.accessToken;
   } catch (error) {
     if (error instanceof InteractionRequiredAuthError) {
-      if (!redirectInFlight) {
-        redirectInFlight = true;
+      if (!redirectLock.inFlight) {
+        redirectLock.inFlight = true;
         await msalInstance.acquireTokenRedirect({ scopes: apiScopes, account });
       }
       return null;

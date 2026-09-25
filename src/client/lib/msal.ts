@@ -83,6 +83,22 @@ export function ensureMsalInitialized(): Promise<void> {
 }
 
 /**
+ * Guards the two branches below against firing more than once. The dashboard
+ * fires several API calls at once on load (the page's own data, the sidebar
+ * badge count, ...), and every one of them calls this function. The first
+ * time a token for the current scope is not already cached -- the moment
+ * right after signing in, before anything has been silently renewed yet --
+ * every one of those concurrent calls would independently start its own
+ * redirect, each overwriting the PKCE request state the last one just wrote,
+ * so whichever navigation actually won the race came back to a state that no
+ * longer matched (`state_mismatch`), which read as the app "coming and going"
+ * on a loop. Only the first caller may actually redirect; the same guard as
+ * AuthGate's, for the same StrictMode reason: module scope, not a ref or a
+ * component-local variable.
+ */
+let redirectInFlight = false;
+
+/**
  * An access token for the API, or `null` if nobody is signed in yet.
  *
  * Tries silently first -- the common case, using the cached refresh token --
@@ -93,7 +109,10 @@ export function ensureMsalInitialized(): Promise<void> {
 export async function getAccessToken(): Promise<string | null> {
   const account = msalInstance.getActiveAccount() ?? msalInstance.getAllAccounts()[0];
   if (!account) {
-    await msalInstance.loginRedirect({ scopes: apiScopes });
+    if (!redirectInFlight) {
+      redirectInFlight = true;
+      await msalInstance.loginRedirect({ scopes: apiScopes });
+    }
     return null;
   }
 
@@ -102,7 +121,10 @@ export async function getAccessToken(): Promise<string | null> {
     return result.accessToken;
   } catch (error) {
     if (error instanceof InteractionRequiredAuthError) {
-      await msalInstance.acquireTokenRedirect({ scopes: apiScopes, account });
+      if (!redirectInFlight) {
+        redirectInFlight = true;
+        await msalInstance.acquireTokenRedirect({ scopes: apiScopes, account });
+      }
       return null;
     }
     throw error;

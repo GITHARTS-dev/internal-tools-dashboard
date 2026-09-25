@@ -26,8 +26,11 @@ export function makeTool(overrides: Partial<Tool> = {}): Tool {
     notes: null,
     started_on: '2024-10-15',
     cancelled_on: null,
+    internal_product_id: null,
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',
+    deleted_at: null,
+    deleted_by: null,
     ...overrides,
   };
 }

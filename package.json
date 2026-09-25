@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
-    "dev:api": "tsx watch src/server/dev.ts",
+    "dev:api": "tsx watch --env-file-if-exists=.env.local src/server/dev.ts",
     "dev:web": "vite",
     "build": "npm run build:azure",
     "typecheck": "tsc --noEmit",

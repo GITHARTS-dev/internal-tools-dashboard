@@ -10,7 +10,10 @@
  * and production fidelity each live where they belong.
  *
  * Point this at a real Postgres instead by setting DATABASE_URL -- useful for
- * checking against Supabase before a deploy.
+ * checking against Supabase before a deploy. `npm run dev:api` loads
+ * `.env.local` into this process (if the file exists), so a `DATABASE_URL=`
+ * line there is enough. Vite reads the same file but only passes `VITE_*`
+ * names to the browser, so the connection string never reaches the bundle.
  */
 
 import { serve } from '@hono/node-server';

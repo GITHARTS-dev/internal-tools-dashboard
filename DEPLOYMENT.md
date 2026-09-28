@@ -1,10 +1,12 @@
 # Deployment runbook — Azure Static Web Apps + Supabase
 
-Everything that can be built without live credentials is built and tested. This
-file is what remains, in order, with the exact commands.
+The steps to take this app live, in order, with the exact commands.
 
-Nothing here has been run. No Azure resource, Supabase project, Teams workflow
-or AWS key exists yet.
+**Status (28 Sep 2026):** steps 1–5 are done. The app is live on Azure Static
+Web Apps against a Supabase database, sign-in works, and Teams reminders reach
+their recipients. AWS cost import (step 6) and email (step 7) are not set up.
+If something misbehaves, [Troubleshooting](#troubleshooting) lists every
+problem hit on the way there and its fix.
 
 ```
 GitHub push
@@ -56,6 +58,17 @@ Apply the schema from your machine:
 DATABASE_URL="postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres" \
   npm run migrate:pg
 ```
+
+In PowerShell:
+
+```powershell
+$env:DATABASE_URL="postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres"
+npm run migrate:pg
+```
+
+A password containing `@`, `#`, `/` or `?` must be URL-encoded inside the URI.
+If the direct host cannot be reached (it is IPv6-only on some plans, and many
+office networks are not), use the **session pooler** URI from the same page.
 
 Add `-- --dry-run` to see what it would apply first. It is idempotent: it
 tracks what has run in a `schema_migrations` table, so running it again after
@@ -141,16 +154,20 @@ own login screen, the same as someone outside the company entirely.
 Portal → **Create a resource → Static Web App**:
 
 - Plan type: **Free**
-- Deployment: **GitHub**, pointing at this repo and the branch you deploy from
-- Build presets: **Custom**, and leave the paths blank — the workflow in this
-  repo builds everything and uploads the result, so Azure's own build step is
-  skipped
+- Deployment source: **Other**. This repo's own workflow,
+  [.github/workflows/azure-deploy.yml](.github/workflows/azure-deploy.yml),
+  runs the tests, builds the app and API, and uploads the result. Picking
+  **GitHub** here instead makes Azure commit a second workflow of its own that
+  skips the tests and knows nothing about the sign-in build variables; if that
+  happens, delete it and keep this one.
 
-Azure will offer to add its own workflow file. This repo already has
-[.github/workflows/azure-deploy.yml](.github/workflows/azure-deploy.yml), which
-runs the tests before deploying. Delete the generated one and keep this.
+Copy the **deployment token** (Overview → Manage deployment token), and the
+site's address from the Overview page.
 
-Copy the **deployment token** (Overview → Manage deployment token).
+`staticwebapp.config.json` lives in `public/`, not the repo root: the deploy
+only reads it from the built output (`dist/client`), and Vite copies `public/`
+there. At the root, the API runtime setting in it was never seen and the
+deploy failed with "Function language info isn't provided."
 
 ### Configuration
 
@@ -162,13 +179,28 @@ Copy the **deployment token** (Overview → Manage deployment token).
 | `AAD_TENANT_ID` | Directory (tenant) ID |
 | `AAD_CLIENT_ID` | Application (client) ID |
 | `REMINDER_TOKEN` | A long random string you generate |
+| `APP_ENV` | `production` |
+| `APP_URL` | `https://<your-site>.azurestaticapps.net` (optional: adds "Open the dashboard" and per-alert links to Teams cards) |
 | `TEAMS_WEBHOOK_URL` | From step 5 (optional; can also live in Settings) |
 | `AWS_ACCESS_KEY_ID` | From step 6 |
 | `AWS_SECRET_ACCESS_KEY` | From step 6 |
-| `APP_ENV` | `production` |
 
-This is what the API uses to verify a request's token — the tenant and client
-ID it should match, nothing more. There is no `AAD_CLIENT_SECRET` to set.
+`AAD_TENANT_ID` and `AAD_CLIENT_ID` are what the API verifies a request's token
+against — the tenant and client ID it should match, nothing more. There is no
+`AAD_CLIENT_SECRET` to set.
+
+**Set all of these before the first deploy**, not after. Each one that guards
+something is inert while unset, by design, so local development needs no setup:
+
+- Without `AAD_TENANT_ID` / `AAD_CLIENT_ID`, the API checks no tokens at all.
+  The site still shows Microsoft's login, but anyone calling the API directly
+  can read and change everything.
+- Without `REMINDER_TOKEN`, `POST /api/reminders/run` is open to anyone, and
+  its response lists the current alerts: tool names, owners and their emails.
+
+`APP_URL` is also a GitHub secret below, but that one only tells the reminder
+workflow where to call; the API cannot see GitHub secrets, so the card links
+need it here too. Azure applies a changed variable without a redeploy.
 
 Generate the reminder token with:
 
@@ -198,6 +230,14 @@ there would be no point hiding them):
 |---|---|
 | `AAD_CLIENT_ID` | Application (client) ID, same value as above |
 | `AAD_TENANT_ID` | Directory (tenant) ID, same value as above |
+
+Why the two IDs are set in both places: the browser part of the app is plain
+files built by GitHub, so it can only know where to sign in if the IDs are
+written into it at build time (GitHub Variables). The API runs on Azure and
+reads its settings there on every request (Azure environment variables) to
+check that each token came from that same sign-in. `DATABASE_URL` is only ever
+in Azure, so the database password never ends up in files a browser downloads;
+the deployment token is only ever in GitHub.
 
 ---
 
@@ -259,26 +299,57 @@ Build it once, signed in as either recipient:
    trigger is **"When a Teams webhook request is received"**.
 3. In the trigger, set **Who can trigger the flow** to **Anyone**. The app has no
    Microsoft identity to sign the request with; the URL itself is the secret.
-4. Inside the **Apply to each** over the request's `attachments`, use
-   **Post card in a chat or channel** with:
+4. Add **Apply to each**, and for its input use the expression (the **fx**
+   button, not typed into the box):
+   ```
+   triggerBody()?['attachments']
+   ```
+5. Inside the loop, add **Post card in a chat or channel** with:
    - Post as: **Flow bot**
    - Post in: **Chat with Flow bot**
    - Recipient: the first person's email
-   - Adaptive Card: the loop item's `content`
-5. Add a second **Post card in a chat or channel**, the same except for the
-   recipient: the second person. A third person later is a third step.
-6. Save, then copy the webhook URL from the trigger.
+   - Adaptive Card: this expression, again entered through **fx** so the field
+     shows a coloured pill rather than plain text:
+     ```
+     string(items('Apply_to_each')?['content'])
+     ```
+     Picking the loop item's "content" from the dynamic-content list instead
+     can hand Teams the card as an object rather than as text, and the run
+     fails with "The specified Teams flowbot message's message body is invalid
+     JSON". The `string(...)` is what prevents that. If the loop is named
+     differently, use its name with spaces as underscores.
+6. Add another **Post card in a chat or channel**, still inside the loop, the
+   same except for the recipient. One step per person.
+7. Save, then copy the **HTTP POST URL** from the trigger. It only appears
+   after the first save.
 
 Labels shift a little between Teams versions; the shape is always trigger →
 loop over attachments → one post-to-chat step per person.
+
+The **"Send webhook alerts to a chat"** template is the simpler alternative: it
+posts everything into one chat you pick, with no loop to build. Pick a group
+chat containing everyone who should be told, and changing recipients later is
+a change of chat in the workflow. Only one workflow's URL can be in Settings at
+a time, so delete whichever one is not in use.
 
 That URL is a password -- anyone holding it can message those people. Put it in
 the SWA environment variables as `TEAMS_WEBHOOK_URL`, or paste it into the app's
 own Settings page.
 
-Then press **Send test** beside Teams in Settings. Both people should get a chat
-from the Workflows bot within a minute. The test records nothing, so it cannot
-consume a real reminder's dedupe key.
+Then press **Send test** on the Teams row of **Settings → Where reminders go**.
+The button stays disabled until the URL has been saved. Every recipient should
+get a chat from the Workflows bot within a minute: a card saying reminders are
+reaching them, with an example reminder labelled as one. The test records
+nothing, so it cannot consume a real reminder's dedupe key. It is the only way
+to send without consuming one: the daily run and a manual run of **Send due
+reminders** both send every due alert for real, once, to whoever is in the
+workflow at the time. Test with stand-in recipients using **Send test** only,
+and switch to the real people before the daily run is enabled.
+
+To pause all reminders, disable **Send due reminders** (Actions → the workflow
+→ ⋯ → Disable workflow); turning the Teams flow off as well stops anything
+else reaching it. A send that fails is not recorded, so nothing is lost by
+pausing.
 
 One thing to know: the workflow accepts the card and then delivers it on its
 own, so the app sees "accepted", not "delivered". If a card does not arrive,
@@ -325,7 +396,8 @@ the code, logs what it sent, and can be run manually in one click.
 
 That does mean one endpoint is reachable without an interactive sign-in, which
 is why `/api/reminders/run` carries its own shared secret. It is excluded from
-the Entra rule in `staticwebapp.config.json` and checks `x-reminder-token` with
+the API's sign-in check (`requireAuth()` in `src/server/auth/middleware.ts`)
+and checks `x-reminder-token` with
 a constant-time comparison. Without `REMINDER_TOKEN` set, the guard is inert —
 fine locally, wrong in production. **Set it.**
 
@@ -421,10 +493,10 @@ Then set "Send email from" and "Send email to" in Settings.
 
 ## Local development
 
-Unchanged by any of this, and still needs no cloud account:
+Still needs no cloud account. Node 22.9 or newer:
 
 ```bash
-npm install
+npm install         # again after every pull that changes package.json
 npm run db:reset    # rebuild .data/dev.sqlite and load the demo data
 npm run dev         # API on :8788, client on :5173
 ```
@@ -434,11 +506,30 @@ bought back in `tests/postgres.test.ts`, which runs the whole API against real
 Postgres — PGlite, Postgres compiled to WASM — on every `npm test`. That is what
 catches dialect differences before they reach Supabase.
 
-To point local development at a real Postgres instead:
+Optional settings go in a `.env.local` file in the project root. It is
+git-ignored, so each developer makes their own (on Windows, check it has not
+been saved as `.env.local.txt`):
 
-```bash
-DATABASE_URL="postgresql://..." npm run dev:api
 ```
+# Sign in locally exactly as on the live site. Leave out to skip sign-in.
+VITE_AAD_CLIENT_ID=<Application (client) ID>
+VITE_AAD_TENANT_ID=<Directory (tenant) ID>
+
+# Use Postgres instead of SQLite. Leave out to stay on SQLite.
+DATABASE_URL=postgresql://...
+```
+
+Vite reads the `VITE_*` lines for the browser; `npm run dev:api` loads the same
+file into the API process, so `DATABASE_URL` there takes effect. Restart
+`npm run dev` after changing it. The API prints which database it is using when
+it starts: `SQLite · .data/dev.sqlite` or `Postgres · DATABASE_URL`.
+`npm run db:reset` only ever touches the SQLite file.
+
+**Point local development at a separate Supabase project, never the live one.**
+Locally `APP_ENV` is unset, so **Settings → Sample data → Delete everything**
+is enabled, and the Teams webhook URL is stored in the database. Against the
+live database, one click on a developer's machine deletes every real record,
+and **Send test** there messages the real recipients.
 
 ---
 
@@ -454,26 +545,49 @@ history, so the common "undo" is a status change, not a restore.
 
 ---
 
+## Troubleshooting
+
+Every one of these happened during the first deploy. The code fixes are in; the
+entries are here for when the symptom comes back from a configuration change.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Every push to `main` fails within a second, with no jobs, and emails you | The workflow file is invalid. GitHub rejects `secrets.*` inside an `if:` | Test secrets through `env` in `if:` conditions, as `azure-deploy.yml` now does |
+| Deploy workflow fails at **Test** | Node older than 22; vitest 5 needs 22+ | `node-version: 22` in the workflow (already set) |
+| Deploy fails with "Function language info isn't provided" | `staticwebapp.config.json` not in the built output | It must live in `public/` (already moved) |
+| Signing in bounces back and forth forever, then signs out | The app redirected to sign-in before MSAL had finished starting up | Fixed in `AuthGate.tsx`: it waits for `inProgress === None` |
+| Signed in, but every page says "Your sign-in has expired" | Static Web Apps overwrites the `Authorization` header before the API sees it | The browser sends the token as `x-access-token` instead (already done). If it recurs, check `AAD_TENANT_ID` / `AAD_CLIENT_ID` in Azure for typos or trailing spaces, then paste the `x-access-token` from the browser's Network tab into <https://jwt.ms> and compare its `aud`, `iss` and `tid` |
+| "Sign-in didn't complete: state_mismatch" | A stale sign-in attempt in that tab, typically from before the redirect URI existed, or storage cleared mid-attempt | Close every tab of the site and open it in a fresh private window |
+| `curl <site>/api/dashboard` with no token says "sign-in has expired", not "Sign in required" | Expected: Static Web Apps put its own value in `Authorization`, which is refused | Nothing to fix; it confirms the token check is on |
+| Teams run history: "message body is invalid JSON" | The Adaptive Card field received the card as an object, or the expression as plain text | Use `string(items('Apply_to_each')?['content'])`, entered through **fx** (step 5) |
+| A developer's local `npm run dev` stays on SQLite despite `DATABASE_URL` in `.env.local` | Their copy predates `.env.local` loading, or the file is `.env.local.txt` | `git pull`, check the file name, restart |
+| `'concurrently' is not recognized` | `npm install` not run after cloning | `npm install` |
+| Sample-data buttons are disabled on the live site | `APP_ENV=production`, deliberately | Point a local copy at the live database briefly, use **Remove demo data** (never **Delete everything**), then point it back |
+
+---
+
 ## Checklist
 
-- [ ] Supabase project created, password saved
-- [ ] `npm run migrate:pg` against the **direct** URI (5432) succeeds
-- [ ] Entra app registration, single-tenant, redirect platform is **Single-page application** (not Web — no secret should exist)
-- [ ] "Expose an API" has an Application ID URI and the `access_as_user` scope
+- [x] Supabase project created, password saved
+- [x] `npm run migrate:pg` against the **direct** URI (5432) succeeds
+- [x] Entra app registration, single-tenant, redirect platform is **Single-page application** (not Web — no secret should exist)
+- [x] "Expose an API" has an Application ID URI and the `access_as_user` scope
 - [ ] (Optional) Assignment required = Yes, the specific people added, if sign-in should be limited to them
-- [ ] Static Web App created on the **Free** plan, deployment token copied
-- [ ] Azure-generated workflow deleted, this repo's kept
-- [ ] SWA environment variables set (`DATABASE_URL` on the **pooler** 6543, `AAD_TENANT_ID`, `AAD_CLIENT_ID`)
-- [ ] GitHub **secrets** set (`AZURE_STATIC_WEB_APPS_API_TOKEN`, `APP_URL`, `REMINDER_TOKEN`)
-- [ ] GitHub **variables** set (`AAD_CLIENT_ID`, `AAD_TENANT_ID`) — the Variables tab, not Secrets
-- [ ] Deploy green, `curl .../api/health` responds with no sign-in needed
-- [ ] Redirect URI (the site's real hostname) added to the SPA platform in the app registration
-- [ ] **Private window shows "Redirecting to sign in…" then Microsoft's login** — not the app's pages directly
+- [x] Static Web App created on the **Free** plan, deployment source **Other**, deployment token copied
+- [x] SWA environment variables set (`DATABASE_URL` on the **pooler** 6543, `AAD_TENANT_ID`, `AAD_CLIENT_ID`, `REMINDER_TOKEN`, `APP_ENV`, `APP_URL`)
+- [x] GitHub **secrets** set (`AZURE_STATIC_WEB_APPS_API_TOKEN`, `APP_URL`, `REMINDER_TOKEN`)
+- [x] GitHub **variables** set (`AAD_CLIENT_ID`, `AAD_TENANT_ID`) — the Variables tab, not Secrets
+- [x] Deploy green, `curl .../api/health` responds with no sign-in needed
+- [x] `curl -X POST .../api/reminders/run` with no token returns **401**
+- [x] Redirect URI (the site's real hostname) added to the SPA platform in the app registration
+- [x] **Private window shows "Redirecting to sign in…" then Microsoft's login** — not the app's pages directly
 - [ ] An account that shouldn't get in (outside the tenant, or not in the assigned list) is refused
 - [ ] Settings → Exchange rates → **Fetch rates now** pressed once
-- [ ] Teams workflow built, one post-to-chat step per person, trigger set to **Anyone**
-- [ ] Webhook URL set, **Send test** reaches both people
+- [x] Teams workflow built, one post-to-chat step per person, trigger set to **Anyone**
+- [x] Webhook URL set, **Send test** reaches both people
+- [ ] Real recipients in the Teams workflow, test tool and demo data removed
 - [ ] "Send due reminders" workflow run manually, card arrives
+- [ ] Local development pointed at a separate Supabase project, not the live one
 - [ ] AWS: Cost Explorer enabled, IAM user with only `ce:GetCostAndUsage`, keys set
 - [ ] Settings → AWS costs: product chosen, **Import from AWS** records past months
-- [ ] `reminders.yml` merged to `main`, so the daily schedule actually runs
+- [x] `reminders.yml` merged to `main`, so the daily schedule actually runs

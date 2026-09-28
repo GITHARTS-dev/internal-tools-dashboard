@@ -20,18 +20,25 @@ It answers three questions that currently have no home:
    dashboard, splitting what we buy from what it costs to run our own products,
    with the trend and where the money is concentrated underneath.
 
-> **Status: not deployed.** This runs entirely on your own machine while the
-> features and design are reviewed. It needs no cloud account, no credit card
-> and no sign-up. When you are ready, [DEPLOYMENT.md](DEPLOYMENT.md) is the
-> runbook for Azure Static Web Apps + Supabase.
+> **Status: live** on Azure Static Web Apps + Supabase, with Microsoft sign-in
+> and daily Teams reminders. [DEPLOYMENT.md](DEPLOYMENT.md) is the runbook,
+> including a troubleshooting table. Local development still needs no cloud
+> account.
 
 ## Running it
 
+Needs Node 22.9 or newer.
+
 ```bash
-npm install
+npm install        # again after any pull that changes package.json
 npm run db:reset   # create the local database and load demo data
 npm run dev        # API on :8788, app on http://localhost:5173
 ```
+
+With no further setup this runs on a local SQLite file with sign-in switched
+off. To sign in locally, or to use a Postgres database instead, create a
+git-ignored `.env.local`; [DEPLOYMENT.md → Local development](DEPLOYMENT.md#local-development)
+has the lines. Never point it at the live database.
 
 Open <http://localhost:5173>. The demo data is deliberately messy: an overdue
 payment, a bill due this week, a cancellation window that has already closed,
@@ -142,15 +149,16 @@ rather than creating duplicates.
 
 ## Configuration
 
-Set as environment variables in the Static Web App, or in your shell locally.
-Nothing secret belongs in a committed file.
+Set as environment variables in the Static Web App, or locally in `.env.local`
+(git-ignored) or your shell. Nothing secret belongs in a committed file.
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | Supabase connection string. Unset locally, which selects SQLite. |
+| `DATABASE_URL` | Supabase connection string (the transaction pooler, port 6543, in production). Unset locally, which selects SQLite. |
 | `AAD_TENANT_ID` / `AAD_CLIENT_ID` | The Entra app registration the API checks tokens against. Also needed at *build* time, as `VITE_AAD_TENANT_ID` / `VITE_AAD_CLIENT_ID`, so the browser knows where to sign in. Unset (either half): sign-in is skipped entirely, which is normal locally and wrong in production. Not secret -- no `AAD_CLIENT_SECRET` exists, because there is no client secret in this design. |
-| `REMINDER_TOKEN` | Shared secret for `POST /api/reminders/run`, the one endpoint a machine calls. Inert when unset. |
+| `REMINDER_TOKEN` | Shared secret for `POST /api/reminders/run`, the one endpoint a machine calls. Inert when unset, which leaves that endpoint open: always set it in production. |
 | `APP_ENV` | `production` disables the demo-data controls. |
+| `APP_URL` | The site's own address. Adds "Open the dashboard" and per-alert links to Teams cards; unset, the cards have no links. |
 | `FEATURE_DOCUMENTS` | `true` enables contract/invoice records. Off by default -- invoices are not tracked for now; a payment's invoice reference and URL are plain optional text regardless of this flag. |
 | `TEAMS_WEBHOOK_URL` | Teams Workflows webhook that chats the recipients (can also be set in Settings). |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | An IAM user allowed only `ce:GetCostAndUsage`. Unset means AWS costs are typed by hand. |
@@ -241,7 +249,9 @@ The shape:
   token itself on every request (`src/server/auth/`) -- signature, tenant and
   audience -- which is what actually stands between a request and the data,
   now that nothing upstream is gating it. It is free and needs no custom
-  domain.
+  domain. The token travels in an `x-access-token` header, not
+  `Authorization`, because Static Web Apps overwrites the latter before the
+  API sees it.
 - **Reminders** fire from a scheduled GitHub Actions workflow, because managed
   Functions are HTTP-only and have no timer trigger.
 

@@ -2,6 +2,9 @@ import { formatDate, relativeDays } from '../../shared/dates';
 import { alertsByRule } from '../../shared/alerts';
 import type { Alert } from '../../shared/types';
 
+/** Starts every message's title, so a subject line says which app it is from. */
+export const SUBJECT_PREFIX = 'Tools & subscriptions: ';
+
 const RULE_HEADINGS: Record<string, string> = {
   payment_overdue: 'Overdue payments',
   payment_due_soon: 'Payments due soon',

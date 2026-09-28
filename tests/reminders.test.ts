@@ -337,6 +337,47 @@ describe('Teams card', () => {
     expect(text).toContain('Clockify');
     expect(text).toContain('attention'); // critical colour
   });
+
+  it('shows each alert\'s detail line, not just its title -- the amount and date live there', async () => {
+    await seedOverduePayment();
+    const channel = recordingChannel();
+    await runReminders(db, env, { today: '2026-09-18', channels: [channel] });
+
+    const payload = channel.sent[0]!;
+    const text = JSON.stringify(buildTeamsCard(payload));
+    for (const alert of payload.alerts) expect(text).toContain(JSON.stringify(alert.detail).slice(1, -1));
+  });
+
+  it('uses the title without its app prefix as the headline', async () => {
+    await seedOverduePayment();
+    const channel = recordingChannel();
+    await runReminders(db, env, { today: '2026-09-18', channels: [channel] });
+
+    const body = (buildTeamsCard(channel.sent[0]!) as any).attachments[0].content.body;
+    expect(body[0].text).toBe('TOOLS & SUBSCRIPTIONS');
+    expect(body[1].text).not.toContain('Tools & subscriptions:');
+    expect(body[1].text).toMatch(/^\d+ urgent item/);
+  });
+
+  it('links each alert and the dashboard when APP_URL is set, and has no links without it', async () => {
+    await seedOverduePayment();
+    const channel = recordingChannel();
+    await runReminders(db, env, { today: '2026-09-18', channels: [channel] });
+    const payload = channel.sent[0]!;
+
+    const linked = (buildTeamsCard(payload, 'https://example.azurestaticapps.net/') as any).attachments[0].content;
+    expect(linked.actions).toEqual([
+      { type: 'Action.OpenUrl', title: 'Open the dashboard', url: 'https://example.azurestaticapps.net' },
+    ]);
+    const toolId = payload.alerts.find((a) => a.tool_id)!.tool_id!;
+    expect(JSON.stringify(linked)).toContain(`https://example.azurestaticapps.net/tools/${toolId}`);
+
+    const unlinked = JSON.stringify(buildTeamsCard(payload));
+    expect(unlinked).not.toContain('Action.OpenUrl');
+
+    // Anything that is not an http(s) address is ignored rather than linked.
+    expect(JSON.stringify(buildTeamsCard(payload, 'javascript:alert(1)'))).not.toContain('Action.OpenUrl');
+  });
 });
 
 describe('the console channel', () => {

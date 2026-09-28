@@ -1,7 +1,6 @@
 import type { Channel, NotificationPayload } from './types';
-import { groupedSections, summaryLine } from './format';
-import { formatDate, relativeDays } from '../../shared/dates';
-import type { Alert, AppSettings } from '../../shared/types';
+import { SUBJECT_PREFIX, groupedSections, summaryLine } from './format';
+import type { Alert } from '../../shared/types';
 
 /**
  * Microsoft Teams, via an incoming webhook URL.
@@ -25,16 +24,40 @@ const SEVERITY_COLOUR: Record<string, string> = {
   info: 'default',
 };
 
-function alertBlock(alert: Alert): unknown {
-  const when =
-    alert.days_until === null
-      ? ''
-      : `${relativeDays(alert.days_until)}${alert.date ? ` · ${formatDate(alert.date)}` : ''}`;
-  const owner = alert.owner_name ? ` · ${alert.owner_name}` : '';
+/**
+ * The site's own address, for links back into it -- or null, and the card
+ * simply has no links. From `APP_URL` in the API's environment: the request a
+ * Function receives behind Static Web Apps is not a reliable source for the
+ * public hostname, and a link to the wrong host is worse than none.
+ */
+function siteUrl(raw: string | undefined): string | null {
+  const url = raw?.trim().replace(/\/+$/, '');
+  return url && /^https?:\/\//.test(url) ? url : null;
+}
+
+function alertLink(alert: Alert, base: string | null): string | null {
+  if (!base) return null;
+  if (alert.tool_id) return `${base}/tools/${encodeURIComponent(alert.tool_id)}`;
+  if (alert.product_id) return `${base}/products/${encodeURIComponent(alert.product_id)}`;
+  return null;
+}
+
+/**
+ * One alert: what happened, then the sentence that says what it costs and by
+ * when, then who owns it.
+ *
+ * The detail line is the useful part -- the amount, the cancel-by date, the
+ * instruction -- and it used to be dropped for any alert with a date, leaving
+ * "in 5 days · owner" under a title that had already said "in 5 days".
+ */
+function alertBlock(alert: Alert, base: string | null): unknown {
+  const owner = alert.owner_name ?? alert.owner_email;
+  const link = alertLink(alert, base);
 
   return {
     type: 'Container',
-    spacing: 'Small',
+    spacing: 'Medium',
+    ...(link ? { selectAction: { type: 'Action.OpenUrl', url: link, title: `Open ${alert.tool_name}` } } : {}),
     items: [
       {
         type: 'TextBlock',
@@ -43,25 +66,40 @@ function alertBlock(alert: Alert): unknown {
         weight: 'Bolder',
         color: SEVERITY_COLOUR[alert.severity] ?? 'default',
       },
-      {
-        type: 'TextBlock',
-        // An alert with no date has nothing to say about when, so its detail is
-        // the useful line. Without this a missing-data alert with an owner
-        // rendered as just "· Owner", and told the reader nothing.
-        text: (when ? `${when}${owner}` : `${alert.detail}${owner}`).trim(),
-        wrap: true,
-        isSubtle: true,
-        spacing: 'None',
-        size: 'Small',
-      },
+      { type: 'TextBlock', text: alert.detail, wrap: true, spacing: 'Small' },
+      ...(owner
+        ? [{ type: 'TextBlock', text: `Owner: ${owner}`, wrap: true, isSubtle: true, size: 'Small', spacing: 'Small' }]
+        : []),
     ],
   };
 }
 
-export function buildTeamsCard(payload: NotificationPayload): unknown {
+/** "Tools & subscriptions: 2 urgent items" -> "2 urgent items"; the prefix becomes the eyebrow instead. */
+function headline(title: string): string {
+  const rest = title.startsWith(SUBJECT_PREFIX) ? title.slice(SUBJECT_PREFIX.length) : title;
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
+}
+
+export function buildTeamsCard(payload: NotificationPayload, appUrl?: string): unknown {
+  const base = siteUrl(appUrl);
+
   const body: unknown[] = [
-    { type: 'TextBlock', text: payload.title, wrap: true, size: 'Large', weight: 'Bolder' },
-    { type: 'TextBlock', text: summaryLine(payload.alerts), wrap: true, isSubtle: true, spacing: 'None' },
+    {
+      type: 'TextBlock',
+      text: SUBJECT_PREFIX.replace(/:\s*$/, '').toUpperCase(),
+      size: 'Small',
+      weight: 'Bolder',
+      isSubtle: true,
+      wrap: true,
+    },
+    { type: 'TextBlock', text: headline(payload.title), size: 'Large', weight: 'Bolder', wrap: true, spacing: 'None' },
+    {
+      type: 'TextBlock',
+      text: payload.subtitle ?? summaryLine(payload.alerts),
+      wrap: true,
+      isSubtle: true,
+      spacing: 'Small',
+    },
   ];
 
   for (const section of groupedSections(payload.alerts)) {
@@ -70,11 +108,11 @@ export function buildTeamsCard(payload: NotificationPayload): unknown {
       text: `${section.heading} (${section.alerts.length})`,
       wrap: true,
       weight: 'Bolder',
-      spacing: 'Medium',
+      spacing: 'Large',
       separator: true,
     });
     // Capped so one very noisy day cannot produce a card Teams refuses to render.
-    for (const alert of section.alerts.slice(0, 10)) body.push(alertBlock(alert));
+    for (const alert of section.alerts.slice(0, 10)) body.push(alertBlock(alert, base));
     if (section.alerts.length > 10) {
       body.push({
         type: 'TextBlock',
@@ -95,7 +133,11 @@ export function buildTeamsCard(payload: NotificationPayload): unknown {
           $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
           type: 'AdaptiveCard',
           version: '1.4',
+          // Teams otherwise renders a card at a fixed narrow width, which
+          // wraps every detail line two or three times.
+          msteams: { width: 'Full' },
           body,
+          ...(base ? { actions: [{ type: 'Action.OpenUrl', title: 'Open the dashboard', url: base }] } : {}),
         },
       },
     ],
@@ -105,7 +147,7 @@ export function buildTeamsCard(payload: NotificationPayload): unknown {
 export const teamsChannel: Channel = {
   name: 'teams',
 
-  isConfigured(settings: AppSettings, env) {
+  isConfigured(settings, env) {
     return Boolean(settings.teams_webhook_url || env['TEAMS_WEBHOOK_URL']);
   },
 
@@ -119,7 +161,7 @@ export const teamsChannel: Channel = {
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(buildTeamsCard(payload)),
+        body: JSON.stringify(buildTeamsCard(payload, env['APP_URL'])),
       });
       if (!response.ok) {
         const text = await response.text().catch(() => '');

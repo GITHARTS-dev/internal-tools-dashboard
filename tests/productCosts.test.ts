@@ -494,11 +494,11 @@ describe('the missing-costs alert in Teams', () => {
 
   it('says what to do, not just who owns it', () => {
     const lines = texts();
-    // The detail line carries the instruction and then the owner. It used to be
-    // just "· Madhan" for any alert without a date, which told the reader nothing.
-    const detail = lines.find((t) => t.includes('Enter what its cloud providers billed'));
-    expect(detail).toBeDefined();
-    expect(detail).toContain('Madhan');
+    // The detail line carries the instruction, and the owner gets a line of its
+    // own. It used to be just "· Madhan" for any alert without a date, which
+    // told the reader nothing.
+    expect(lines.some((t) => t.includes('Enter what its cloud providers billed'))).toBe(true);
+    expect(lines).toContain('Owner: Madhan');
     expect(lines).not.toContain('· Madhan');
   });
 });

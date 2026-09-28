@@ -2,7 +2,7 @@ import { isNotifiable } from '../../shared/alerts';
 import type { Alert, AppSettings } from '../../shared/types';
 import { alreadySentKeys, recordNotification } from '../repo/notifications';
 import type { Db } from '../repo/db';
-import { formatAlertsText, summaryLine } from './format';
+import { SUBJECT_PREFIX, formatAlertsText, summaryLine } from './format';
 import type { Channel, ChannelResult, NotificationPayload } from './types';
 
 /**
@@ -44,10 +44,10 @@ function buildPayload(alerts: Alert[], kind: 'alerts' | 'digest'): NotificationP
   const critical = alerts.filter((a) => a.severity === 'critical').length;
   const title =
     kind === 'digest'
-      ? `Tools & subscriptions: week ahead (${alerts.length} item${alerts.length === 1 ? '' : 's'})`
+      ? `${SUBJECT_PREFIX}week ahead (${alerts.length} item${alerts.length === 1 ? '' : 's'})`
       : critical > 0
-        ? `Tools & subscriptions: ${critical} urgent item${critical === 1 ? '' : 's'}`
-        : `Tools & subscriptions: ${alerts.length} item${alerts.length === 1 ? '' : 's'} need attention`;
+        ? `${SUBJECT_PREFIX}${critical} urgent item${critical === 1 ? '' : 's'}`
+        : `${SUBJECT_PREFIX}${alerts.length} item${alerts.length === 1 ? '' : 's'} need attention`;
 
   return { title, text: formatAlertsText(alerts), alerts, kind };
 }

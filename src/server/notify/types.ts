@@ -3,6 +3,8 @@ import type { Alert, AppSettings } from '../../shared/types';
 export interface NotificationPayload {
   /** One-line subject: what this message is about. */
   title: string;
+  /** Replaces the "N items need attention" line under the title, where a channel shows one. */
+  subtitle?: string;
   /** Plain-text body, used verbatim by channels without rich formatting. */
   text: string;
   alerts: Alert[];

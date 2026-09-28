@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { settingsUpdateSchema } from '../../shared/schema';
-import { isIsoDate, todayInTimezone } from '../../shared/dates';
+import { addDays, formatDate, isIsoDate, todayInTimezone } from '../../shared/dates';
+import { formatMoney } from '../../shared/money';
+import { SUBJECT_PREFIX } from '../notify/format';
 import type { Alert } from '../../shared/types';
 import type { AppContext, Env, Variables } from '../context';
 import { actor, db, envVars, featureDocuments, zodErrorResponse } from '../context';
@@ -199,28 +201,35 @@ adminRoutes.post('/channels/:name/test', async (c) => {
 
   // A synthetic alert, so the card exercises the real rendering path rather
   // than a special "test" layout that could look fine while the real one breaks.
+  // Shaped like a real renewal a week out -- what people will actually get --
+  // and labelled as an example throughout, so nobody goes looking for the tool.
+  // No tool_id: there is nothing to link to.
   const today = todayInTimezone(settings.timezone);
+  const renews = addDays(today, 7);
+  const amount = formatMoney(1_200_000, settings.default_currency);
   const sample: Alert = {
     rule: 'renewal_upcoming',
-    severity: 'info',
-    tool_id: 'test',
+    severity: 'warning',
+    tool_id: null,
     product_id: null,
-    tool_name: 'Test message',
+    tool_name: 'Example tool',
     payment_id: null,
-    title: 'Test message from the tools dashboard',
-    detail: 'If you can read this in Teams, the webhook works. Nothing was logged.',
-    date: today,
-    days_until: 0,
+    title: 'Example tool renews in 7 days',
+    detail: `Auto-renews on ${formatDate(renews)} for ${amount}. (An example, not a real tool.)`,
+    date: renews,
+    days_until: 7,
     amount: null,
     currency: null,
-    owner_name: null,
+    owner_name: 'Example owner',
     owner_email: null,
     dedupe_key: `test:${Date.now()}`,
   };
 
   const result = await channel.send(
     {
-      title: 'Tools & subscriptions: test message',
+      title: `${SUBJECT_PREFIX}test message`,
+      subtitle:
+        'Reminders are reaching you. Below is an example of what a real one looks like. Nothing here is real, and nothing was recorded.',
       text: 'If you can read this, the webhook works. Nothing was recorded.',
       alerts: [sample],
       kind: 'alerts',

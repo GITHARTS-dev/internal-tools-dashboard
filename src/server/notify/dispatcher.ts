@@ -174,6 +174,19 @@ export async function dispatchDigest(
       continue;
     }
 
+    // A summary of nothing is noise: it trains people to ignore the card that
+    // matters. Not recorded either, so there is no "sent" week to explain away.
+    if (alerts.length === 0) {
+      report.channels.push({
+        channel: channel.name,
+        status: 'skipped',
+        detail: `nothing due in the next ${settings.digest_horizon_days} days`,
+        new_alerts: 0,
+        alert_titles: [],
+      });
+      continue;
+    }
+
     const key = channelKey(channel.name, `digest:${weekKey}`);
     const sent = await alreadySentKeys(db, [key]);
     if (sent.has(key)) {

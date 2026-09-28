@@ -276,6 +276,17 @@ describe('weekly digest', () => {
     expect(channel.sent.filter((p) => p.kind === 'digest')).toHaveLength(1);
   });
 
+  it('sends nothing on a week with nothing in it, and records nothing', async () => {
+    const channel = recordingChannel();
+
+    // A Monday, with no tools at all: nothing due in the next 45 days.
+    const run = await runReminders(db, env, { today: '2026-09-21', channels: [channel] });
+
+    expect(channel.sent.filter((p) => p.kind === 'digest')).toHaveLength(0);
+    expect(run.digest_dispatch?.channels[0]).toMatchObject({ status: 'skipped', detail: 'nothing due in the next 45 days' });
+    expect(await listNotifications(db)).toHaveLength(0);
+  });
+
   it('does not run on other days', async () => {
     await seedOverduePayment();
     const run = await runReminders(db, env, {

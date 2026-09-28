@@ -373,6 +373,11 @@ On a quiet day it posts nothing at all. The `notification_log` table's unique
 `dedupe_key` is what guarantees the same alert never goes out twice, per
 channel.
 
+Separately, once a week (Monday by default; **Settings → Weekly digest day**)
+it sends one summary of everything due in the next 45 days, including items
+whose individual alerts have already gone out. A week with nothing due sends
+no summary at all.
+
 To see exactly what would fire on any date without sending anything, use
 Settings → **Preview reminders**, or:
 

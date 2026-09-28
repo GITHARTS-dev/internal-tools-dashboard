@@ -191,6 +191,35 @@ describe('requireAuth middleware', () => {
     expect(await res.json()).toEqual({ actor: 'priya@example.com', oid: 'user-object-id' });
   });
 
+  it('reads the token from x-access-token, ignoring whatever Static Web Apps wrote into Authorization', async () => {
+    const { app, env } = testApp({ AAD_TENANT_ID: TENANT, AAD_CLIENT_ID: CLIENT });
+    const token = await makeToken();
+    const res = await app.request(
+      '/api/tools',
+      { headers: { 'x-access-token': token, authorization: 'Bearer platform-injected-value' } },
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ actor: 'priya@example.com', oid: 'user-object-id' });
+  });
+
+  it('refuses a platform-injected Authorization value when no x-access-token is sent', async () => {
+    const { app, env } = testApp({ AAD_TENANT_ID: TENANT, AAD_CLIENT_ID: CLIENT });
+    const res = await app.request('/api/tools', { headers: { authorization: 'Bearer platform-injected-value' } }, env);
+    expect(res.status).toBe(401);
+  });
+
+  it('refuses a bad x-access-token even when Authorization carries a valid one', async () => {
+    const { app, env } = testApp({ AAD_TENANT_ID: TENANT, AAD_CLIENT_ID: CLIENT });
+    const token = await makeToken();
+    const res = await app.request(
+      '/api/tools',
+      { headers: { 'x-access-token': 'not-a-real-token', authorization: `Bearer ${token}` } },
+      env,
+    );
+    expect(res.status).toBe(401);
+  });
+
   it('cannot be spoofed with an x-actor header -- a bad token is refused regardless', async () => {
     const { app, env } = testApp({ AAD_TENANT_ID: TENANT, AAD_CLIENT_ID: CLIENT });
     const res = await app.request(

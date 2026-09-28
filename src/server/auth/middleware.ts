@@ -2,6 +2,7 @@ import type { MiddlewareHandler } from 'hono';
 import type { JWTVerifyGetKey } from 'jose';
 import type { Env, Variables } from '../context';
 import { verifyBearerToken, TokenError } from './verifyToken';
+import { ACCESS_TOKEN_HEADER } from '../../shared/auth';
 
 /**
  * Requires a valid access token on every `/api/*` request, with two named
@@ -18,6 +19,14 @@ import { verifyBearerToken, TokenError } from './verifyToken';
  * deploy before the Entra app registration exists -- makes this inert, the
  * same pattern `REMINDER_TOKEN` already uses: open locally, required in
  * production. `DEPLOYMENT.md` is what actually turns it on.
+ *
+ * The token is read from `x-access-token` first. Static Web Apps writes its
+ * own value into `Authorization` on every request it forwards to the managed
+ * Functions API -- even one the browser sent with no such header -- so a
+ * bearer token sent there never arrives, and every signed-in request was
+ * refused as expired. `Authorization: Bearer` is still accepted as a fallback
+ * for any caller not behind Static Web Apps; it is verified the same way, so
+ * whatever the platform puts there is simply refused.
  */
 export function requireAuth(
   /** Overridable so tests can verify against a local key set instead of a real Entra tenant. */
@@ -31,7 +40,7 @@ export function requireAuth(
     if (!tenantId || !clientId) return next();
 
     const header = c.req.header('authorization') ?? '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+    const token = c.req.header(ACCESS_TOKEN_HEADER)?.trim() || (header.startsWith('Bearer ') ? header.slice(7) : '');
     if (!token) {
       return c.json({ error: 'unauthorized', message: 'Sign in required.' }, 401);
     }

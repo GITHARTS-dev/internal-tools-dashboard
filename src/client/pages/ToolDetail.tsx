@@ -6,6 +6,7 @@ import { Badge, Banner, EmptyState, Loading, StatusBadge, useToast } from '../co
 import { SeatMeter } from '../components/Charts';
 import { annualisedCost, costPerSeat, formatMoney, wastedSeatCost } from '../../shared/money';
 import { daysBetween, formatDate, relativeDays } from '../../shared/dates';
+import { effectiveRenewalDate } from '../../shared/alerts';
 import type { Payment } from '../../shared/types';
 
 const CYCLE_LABEL: Record<string, string> = {
@@ -69,6 +70,33 @@ export default function ToolDetail() {
     if (ok) act(() => api.deleteTool(tool.id), `${tool.name} moved to Trash.`);
   }
 
+  // The same date the server will use, so the confirmation states exactly
+  // what is about to be written.
+  const nextDue = effectiveRenewalDate(tool, today);
+  const scheduleBlocker =
+    tool.cost_amount === null
+      ? 'Enter this tool\'s cost first'
+      : !tool.renewal_date
+        ? 'Set a renewal date first'
+        : !nextDue
+          ? 'The renewal date has passed and this tool does not auto-renew. Update the renewal date first'
+          : null;
+
+  function scheduleNext() {
+    if (!nextDue || tool.cost_amount === null) return;
+    const ok = window.confirm(
+      `Add a payment of ${formatMoney(tool.cost_amount, tool.currency)} due ${formatDate(nextDue)} to ${tool.name}'s payment history?`,
+    );
+    if (ok) act(() => api.schedulePayment(tool.id), 'Next payment scheduled.');
+  }
+
+  function removePayment(payment: Payment) {
+    const ok = window.confirm(
+      `Remove the ${formatMoney(payment.amount, payment.currency)} payment due ${formatDate(payment.due_date)}? This cannot be undone.`,
+    );
+    if (ok) act(() => api.deletePayment(payment.id), 'Payment removed.');
+  }
+
   const trashed = tool.deleted_at !== null;
 
   return (
@@ -99,9 +127,9 @@ export default function ToolDetail() {
             <button
               type="button"
               className="btn"
-              disabled={busy || !tool.renewal_date}
-              title={tool.renewal_date ? 'Create the next payment from this tool\'s cycle' : 'Set a renewal date first'}
-              onClick={() => act(() => api.schedulePayment(tool.id), 'Next payment scheduled.')}
+              disabled={busy || scheduleBlocker !== null}
+              title={scheduleBlocker ?? 'Create the next payment from this tool\'s cycle'}
+              onClick={scheduleNext}
             >
               Schedule next payment
             </button>
@@ -271,14 +299,25 @@ export default function ToolDetail() {
                     </td>
                     <td className="num">
                       {payment.status === 'due' ? (
-                        <button
-                          type="button"
-                          className="btn sm"
-                          disabled={busy}
-                          onClick={() => act(() => api.markPaid(payment.id), 'Marked as paid.')}
-                        >
-                          Mark paid
-                        </button>
+                        <div style={{ display: 'inline-flex', gap: 6 }}>
+                          <button
+                            type="button"
+                            className="btn sm"
+                            disabled={busy}
+                            onClick={() => act(() => api.markPaid(payment.id), 'Marked as paid.')}
+                          >
+                            Mark paid
+                          </button>
+                          {/* Only unpaid rows: a paid one is a record of money that went out. */}
+                          <button
+                            type="button"
+                            className="btn sm subtle"
+                            disabled={busy}
+                            onClick={() => removePayment(payment)}
+                          >
+                            Remove
+                          </button>
+                        </div>
                       ) : null}
                     </td>
                   </tr>

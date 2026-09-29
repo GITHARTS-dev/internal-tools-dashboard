@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { toolCreateSchema, toolUpdateSchema, paymentCreateSchema } from '../../shared/schema';
-import { advanceByCycle, todayInTimezone } from '../../shared/dates';
+import { advanceByCycle, formatDate, todayInTimezone } from '../../shared/dates';
 import type { Env, Variables } from '../context';
 import { actor, db, featureDocuments, patchFrom, zodErrorResponse } from '../context';
 import {
@@ -23,6 +23,7 @@ import { createPayment, listPayments } from '../repo/payments';
 import { diffRecords, listAuditForEntity, recordAudit } from '../repo/audit';
 import { listDocuments } from '../repo/documents';
 import { getSettings } from '../repo/settings';
+import { effectiveRenewalDate } from '../../shared/alerts';
 import type { ToolStatus } from '../../shared/types';
 
 export const toolsRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -217,6 +218,15 @@ toolsRoutes.delete('/trash/:id', async (c) => {
  *
  * Saves re-typing the same amount every period, and means a renewal date in
  * the record turns into an actual chaseable due date in the ledger.
+ *
+ * Three things it refuses, because each one used to leave a wrong row in the
+ * payment history that the tool page gave no way to remove:
+ *   - no amount: a tool with no cost would have produced a ₹0 payment;
+ *   - a second payment on the same due date: the date is taken from the
+ *     renewal date, so pressing the button twice duplicated the row;
+ *   - a date in the past for an auto-renewing tool whose stored renewal date
+ *     has drifted: it uses the date the reminders engine does, rolled forward
+ *     by whole cycles, instead of a stale one that would show as overdue.
  */
 toolsRoutes.post('/:id/payments', async (c) => {
   const id = c.req.param('id');
@@ -224,14 +234,39 @@ toolsRoutes.post('/:id/payments', async (c) => {
   if (!tool) return c.json({ error: 'not_found', message: 'No such tool.' }, 404);
 
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
-  const dueDate = (body['due_date'] as string) || tool.renewal_date;
+  const settings = await getSettings(db(c));
+  const dueDate =
+    (body['due_date'] as string) || effectiveRenewalDate(tool, todayInTimezone(settings.timezone));
   if (!dueDate) {
     return c.json(
       {
         error: 'missing_due_date',
-        message: 'This tool has no renewal date, so give the payment a due date.',
+        message: tool.renewal_date
+          ? `The renewal date (${formatDate(tool.renewal_date)}) has passed and ${tool.name} does not auto-renew. Update its renewal date first.`
+          : 'This tool has no renewal date, so give the payment a due date.',
       },
       400,
+    );
+  }
+
+  if (body['amount'] === undefined && tool.cost_amount === null) {
+    return c.json(
+      {
+        error: 'missing_cost',
+        message: `${tool.name} has no cost yet. Enter its cost first, so the payment has an amount.`,
+      },
+      400,
+    );
+  }
+
+  const existing = await listPayments(db(c), { toolId: id });
+  if (existing.some((p) => p.due_date === dueDate)) {
+    return c.json(
+      {
+        error: 'already_scheduled',
+        message: `A payment due ${formatDate(dueDate)} is already in ${tool.name}'s payment history. To schedule the one after it, update the renewal date first.`,
+      },
+      409,
     );
   }
 

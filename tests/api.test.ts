@@ -287,6 +287,63 @@ describe('payments', () => {
     expect(res.json.error).toBe('missing_due_date');
   });
 
+  it('refuses to schedule a ₹0 payment for a tool with no cost', async () => {
+    const tool = await createTool({ cost_amount: null });
+    const res = await api(env, 'POST', `/api/tools/${tool.id}/payments`, {});
+
+    expect(res.status).toBe(400);
+    expect(res.json.error).toBe('missing_cost');
+    const detail = await api(env, 'GET', `/api/tools/${tool.id}`);
+    expect(detail.json.payments).toHaveLength(0);
+  });
+
+  it('refuses a second payment on the same due date -- pressing the button twice used to duplicate it', async () => {
+    const tool = await createTool();
+    expect((await api(env, 'POST', `/api/tools/${tool.id}/payments`, {})).status).toBe(201);
+
+    const again = await api(env, 'POST', `/api/tools/${tool.id}/payments`, {});
+    expect(again.status).toBe(409);
+    expect(again.json.error).toBe('already_scheduled');
+
+    // Still refused once the first one is paid: it is the same period.
+    const [first] = (await api(env, 'GET', `/api/tools/${tool.id}`)).json.payments;
+    await api(env, 'POST', `/api/payments/${first.id}/mark-paid`, {});
+    expect((await api(env, 'POST', `/api/tools/${tool.id}/payments`, {})).status).toBe(409);
+
+    const detail = await api(env, 'GET', `/api/tools/${tool.id}`);
+    expect(detail.json.payments).toHaveLength(1);
+  });
+
+  it('rolls a drifted renewal date forward for an auto-renewing tool instead of scheduling in the past', async () => {
+    const tool = await createTool({ renewal_date: '2025-03-14', auto_renew: true });
+    const res = await api(env, 'POST', `/api/tools/${tool.id}/payments`, {});
+
+    expect(res.status).toBe(201);
+    const today = new Date().toISOString().slice(0, 10);
+    expect(res.json.payment.due_date >= today).toBe(true);
+    expect(res.json.payment.due_date.endsWith('-03-14')).toBe(true); // whole annual cycles on
+  });
+
+  it('refuses a lapsed renewal date on a tool that does not auto-renew', async () => {
+    const tool = await createTool({ renewal_date: '2025-03-14', auto_renew: false });
+    const res = await api(env, 'POST', `/api/tools/${tool.id}/payments`, {});
+
+    expect(res.status).toBe(400);
+    expect(res.json.error).toBe('missing_due_date');
+    expect(res.json.message).toContain('has passed');
+  });
+
+  it('removes a payment that was scheduled by mistake', async () => {
+    const tool = await createTool();
+    const created = await api(env, 'POST', `/api/tools/${tool.id}/payments`, {});
+
+    expect((await api(env, 'DELETE', `/api/payments/${created.json.payment.id}`)).status).toBe(200);
+    const detail = await api(env, 'GET', `/api/tools/${tool.id}`);
+    expect(detail.json.payments).toHaveLength(0);
+    // Removing it frees the date, so it can be scheduled again correctly.
+    expect((await api(env, 'POST', `/api/tools/${tool.id}/payments`, {})).status).toBe(201);
+  });
+
   it('marks a payment paid and records it in the history', async () => {
     const tool = await createTool();
     const created = await api(env, 'POST', `/api/tools/${tool.id}/payments`, {});

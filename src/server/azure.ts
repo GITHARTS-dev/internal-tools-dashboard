@@ -34,10 +34,17 @@ import type { Env } from './context';
  * real Postgres connections. "Too many connections" is a limit on the direct
  * connection, which this never uses.
  *
- * `idleTimeoutMillis` of five minutes, not thirty seconds. Anyone pausing to
+ * `idleTimeoutMillis` of three minutes, not thirty seconds. Anyone pausing to
  * read a page for more than half a minute used to find the connection closed,
  * and their next click paid for a fresh TLS handshake and pooler login before
  * its first query -- several extra round trips.
+ *
+ * Not longer than that: Azure drops idle outbound TCP connections after about
+ * four minutes, usually without telling either end. A connection kept past
+ * that looks healthy to the pool but is dead, and the next query sent on it
+ * hangs until TCP gives up rather than failing fast. Three minutes stays under
+ * the limit, and `keepAlive` sends TCP keepalive probes on idle connections so
+ * Azure does not count them as idle in the first place.
  */
 let pool: Pool | undefined;
 
@@ -54,7 +61,9 @@ function getPool(): Pool {
   pool = new Pool({
     connectionString,
     max: 3,
-    idleTimeoutMillis: 5 * 60_000,
+    idleTimeoutMillis: 3 * 60_000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 60_000,
     connectionTimeoutMillis: 10_000,
     // Supabase terminates non-TLS connections. `rejectUnauthorized: false` is
     // needed because the pooler presents a certificate for a different host

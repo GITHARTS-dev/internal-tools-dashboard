@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { useIsAuthenticated, useMsal } from '@azure/msal-react';
 import { ToastProvider } from './components/ui';
@@ -50,6 +50,9 @@ function useTheme() {
   return { theme, apply };
 }
 
+/** How stale the sidebar's urgent-item badge may get before a navigation refreshes it. */
+const BADGE_REFRESH_MS = 2 * 60 * 1000;
+
 const TITLES: Array<[RegExp, string, string]> = [
   [/^\/$/, 'Dashboard', 'What needs attention, and what it costs'],
   [/^\/tools\/new$/, 'Add a tool', 'Record a new subscription'],
@@ -72,7 +75,12 @@ export default function App() {
   const [asAt, setAsAt] = useState<string>('');
 
   // The sidebar badge is the one number people look at without clicking in,
-  // so it refreshes on every navigation rather than only on first load.
+  // so it refreshes as people move around rather than only on first load --
+  // but at most every couple of minutes. It is the full dashboard computation,
+  // the heaviest call the API has, and refetching it on every click added that
+  // whole computation to every navigation, on top of the page's own calls. A
+  // badge a minute or two old is fine; the Dashboard page always fetches its
+  // own live figures.
   //
   // This effect lives in App, not inside AuthGate's children, so it is NOT
   // covered by AuthGate deciding whether to render the real app yet -- it
@@ -84,26 +92,26 @@ export default function App() {
   // app "coming and going" on a loop. Skipping the fetch outright while
   // unauthenticated removes the second call site rather than just making its
   // redirect safer.
+  //
+  // No cancel-on-cleanup: a navigation while the fetch is in flight would
+  // throw its result away, and the throttle would then skip the refetch --
+  // the badge would sit empty for the whole window.
+  const badgeFetchedAt = useRef(0);
   useEffect(() => {
     if (authConfigured && !isAuthenticated) return;
-    let cancelled = false;
+    if (Date.now() - badgeFetchedAt.current < BADGE_REFRESH_MS) return;
+    badgeFetchedAt.current = Date.now();
     api
       .dashboard()
       .then((data) => {
-        if (!cancelled) {
-          setAttention(data.alerts.filter((a) => a.severity === 'critical').length);
-          setAsAt(data.today);
-        }
+        setAttention(data.alerts.filter((a) => a.severity === 'critical').length);
+        setAsAt(data.today);
       })
       .catch(() => {
-        if (!cancelled) {
-          setAttention(0);
-          setAsAt('');
-        }
+        badgeFetchedAt.current = 0; // try again on the next navigation
+        setAttention(0);
+        setAsAt('');
       });
-    return () => {
-      cancelled = true;
-    };
   }, [location.pathname, isAuthenticated]);
 
   const [title, subtitle] = (TITLES.find(([pattern]) => pattern.test(location.pathname)) ?? [

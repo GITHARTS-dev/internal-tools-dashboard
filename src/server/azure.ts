@@ -22,10 +22,22 @@ import type { Env } from './context';
 /**
  * One pool per warm instance, created lazily.
  *
- * `max: 1` is not a typo. Each Function instance handles one request at a time,
- * and Supabase's pooler is the thing doing the real pooling; opening several
- * server-side connections per instance is how a handful of concurrent requests
- * turns into "too many connections" on the free tier.
+ * Every query is a network round trip to the database's region, so the two
+ * settings that decide how many of those a page costs matter more here than
+ * anywhere else:
+ *
+ * `max: 3`, not 1. The routes already ask for independent things together
+ * (`Promise.all` over tools, payments, products...), but with a single
+ * connection those queued up and ran one after another -- four round trips
+ * where one would do. Three is still small: these are client connections to
+ * Supabase's transaction pooler (port 6543), which multiplexes them onto a few
+ * real Postgres connections. "Too many connections" is a limit on the direct
+ * connection, which this never uses.
+ *
+ * `idleTimeoutMillis` of five minutes, not thirty seconds. Anyone pausing to
+ * read a page for more than half a minute used to find the connection closed,
+ * and their next click paid for a fresh TLS handshake and pooler login before
+ * its first query -- several extra round trips.
  */
 let pool: Pool | undefined;
 
@@ -41,13 +53,20 @@ function getPool(): Pool {
 
   pool = new Pool({
     connectionString,
-    max: 1,
-    idleTimeoutMillis: 30_000,
+    max: 3,
+    idleTimeoutMillis: 5 * 60_000,
     connectionTimeoutMillis: 10_000,
     // Supabase terminates non-TLS connections. `rejectUnauthorized: false` is
     // needed because the pooler presents a certificate for a different host
     // than the one dialled; the connection is still encrypted.
     ssl: { rejectUnauthorized: false },
+  });
+
+  // A connection held idle for minutes can be closed from the other end. The
+  // pool drops that client on its own, but it reports it as an 'error' event,
+  // and an unhandled 'error' event would take the whole Function instance down.
+  pool.on('error', (error) => {
+    console.warn('Idle database connection closed; the pool will open a new one.', error.message);
   });
 
   return pool;

@@ -123,8 +123,8 @@ export function SpendLead({
         <div className="lead-meta">
           <span className="lead-rate">
             {hasUsage
-              ? 'Subscriptions at today\u2019s prices, plus cloud usage at its recent average'
-              : 'What we are committed to at today\u2019s prices'}{' '}
+              ? 'Every active subscription at its current price, plus cloud usage at its recent average, in this month\u2019s exchange rates'
+              : 'Every active subscription for a year at its current price, in this month\u2019s exchange rates'}{' '}
             · <Money amount={summary.total_monthly_reported} currency={currency} /> a month
           </span>
         </div>

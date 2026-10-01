@@ -176,7 +176,7 @@ export default function Tools() {
                   {header('category', 'Category')}
                   <th scope="col">Billing</th>
                   {header('cost', 'Cost', true)}
-                  <th scope="col">Seats</th>
+                  <th scope="col" className="after-num">Seats</th>
                   {header('renewal', 'Renews')}
                   <th scope="col">Status</th>
                 </tr>
@@ -202,7 +202,7 @@ export default function Tools() {
                           formatMoney(tool.cost_amount, tool.currency)
                         )}
                       </td>
-                      <td>
+                      <td className="after-num">
                         <SeatMeter used={tool.seats_used} purchased={tool.seats_purchased} />
                       </td>
                       <td>

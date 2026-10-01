@@ -607,6 +607,9 @@ tbody tr:last-child td { border-bottom: none; }
 tbody tr { transition: background 0.14s; }
 tbody tr:hover { background: var(--wash-hover); }
 td.num, th.num { text-align: right; }
+/* A left-aligned column straight after a right-aligned number would sit flush
+   against it -- figures ending exactly where the next column's content starts. */
+td.after-num, th.after-num { padding-left: 32px; }
 .cell-primary { font-family: var(--disp); font-weight: 500; color: var(--text-primary); }
 .cell-sub { font-size: 12px; color: var(--text-muted); }
 tbody tr.month-start td { border-top: 1px solid var(--rule-strong); }

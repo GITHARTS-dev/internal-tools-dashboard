@@ -8,5 +8,12 @@ export default defineConfig({
       '@server': fileURLToPath(new URL('./src/server', import.meta.url)),
     },
   },
-  test: { environment: 'node', include: ['tests/**/*.test.ts'] },
+  test: {
+    environment: 'node',
+    include: ['tests/**/*.test.ts'],
+    // Not the 5 s default. The first test in a file also pays for building its
+    // database, and on a busy machine or CI runner that alone has run past 5 s
+    // -- failing a correct test, and with it the deploy the tests gate.
+    testTimeout: 20_000,
+  },
 });

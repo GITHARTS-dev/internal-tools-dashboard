@@ -8,6 +8,7 @@ import { createPayment } from '../src/server/repo/payments';
 import { updateSettings } from '../src/server/repo/settings';
 import type { Channel, NotificationPayload } from '../src/server/notify/types';
 import type { Db } from '../src/server/repo/db';
+import type { Alert } from '../src/shared/types';
 import { testDb } from './db-helper';
 
 let db: Db;
@@ -359,15 +360,51 @@ describe('Teams card', () => {
     for (const alert of payload.alerts) expect(text).toContain(JSON.stringify(alert.detail).slice(1, -1));
   });
 
-  it('uses the title without its app prefix as the headline', async () => {
+  it('heads the card with the app name, the run and the day, then a headline without the app prefix', async () => {
     await seedOverduePayment();
     const channel = recordingChannel();
     await runReminders(db, env, { today: '2026-09-18', channels: [channel] });
 
-    const body = (buildTeamsCard(channel.sent[0]!) as any).attachments[0].content.body;
-    expect(body[0].text).toBe('TOOLS & SUBSCRIPTIONS');
-    expect(body[1].text).not.toContain('Tools & subscriptions:');
-    expect(body[1].text).toMatch(/^\d+ urgent item/);
+    const lines = cardTexts(buildTeamsCard(channel.sent[0]!, { today: '2026-09-18' }));
+    expect(lines[0]).toBe('TOOLS & SUBSCRIPTIONS');
+    expect(lines[1]).toBe('Daily reminder · Friday, 18 Sep 2026');
+    expect(lines[2]).toMatch(/^\d+ urgent item/);
+    expect(lines.filter((l) => l === lines[2])).toHaveLength(1); // stated once, not repeated underneath
+  });
+
+  it('counts the alerts by urgency across the top', async () => {
+    await seedOverduePayment();
+    const channel = recordingChannel();
+    await runReminders(db, env, { today: '2026-09-18', channels: [channel] });
+    const payload = channel.sent[0]!;
+
+    const lines = cardTexts(buildTeamsCard(payload));
+    const urgent = payload.alerts.filter((a) => a.severity === 'critical').length;
+    expect(lines[lines.indexOf('Urgent') - 1]).toBe(String(urgent));
+    expect(lines).toContain('Action needed');
+    expect(lines).toContain('For information');
+  });
+
+  it('lists records missing details as a table of what to fill in, not a repeated sentence', () => {
+    const missing = (name: string, fields: string[], owner: string | null): Alert => ({
+      rule: 'missing_data', severity: 'warning', tool_id: name, product_id: null, tool_name: name,
+      payment_id: null, title: `${name} is missing key details`, detail: 'This record has gaps.',
+      date: null, days_until: null, amount: null, currency: null, owner_name: owner, owner_email: null,
+      missing: fields, dedupe_key: `k-${name}`,
+    });
+    const lines = cardTexts(
+      buildTeamsCard({
+        title: 'Tools & subscriptions: 2 items need attention',
+        text: '',
+        kind: 'alerts',
+        alerts: [missing('Claude', ['Cost', 'Renewal date'], 'Srimathi'), missing('Salary.Com', ['Owner', 'Cost'], null)],
+      }),
+    );
+
+    expect(lines).toEqual(expect.arrayContaining(['TOOL', 'MISSING', 'OWNER']));
+    expect(lines).toEqual(expect.arrayContaining(['Claude', 'Cost, Renewal date', 'Srimathi']));
+    expect(lines).toEqual(expect.arrayContaining(['Salary.Com', 'Owner, Cost', 'Unassigned']));
+    expect(lines.join(' ')).not.toContain('cannot be tracked or chased');
   });
 
   it('links each alert and the dashboard when APP_URL is set, and has no links without it', async () => {
@@ -376,20 +413,37 @@ describe('Teams card', () => {
     await runReminders(db, env, { today: '2026-09-18', channels: [channel] });
     const payload = channel.sent[0]!;
 
-    const linked = (buildTeamsCard(payload, 'https://example.azurestaticapps.net/') as any).attachments[0].content;
-    expect(linked.actions).toEqual([
-      { type: 'Action.OpenUrl', title: 'Open the dashboard', url: 'https://example.azurestaticapps.net' },
+    const linked = (buildTeamsCard(payload, { appUrl: 'https://example.azurestaticapps.net/' }) as any)
+      .attachments[0].content;
+    expect(linked.actions.map((a: any) => [a.title, a.url])).toEqual([
+      ['Open the dashboard', 'https://example.azurestaticapps.net'],
+      ['View all tools', 'https://example.azurestaticapps.net/tools'],
     ]);
     const toolId = payload.alerts.find((a) => a.tool_id)!.tool_id!;
     expect(JSON.stringify(linked)).toContain(`https://example.azurestaticapps.net/tools/${toolId}`);
 
     const unlinked = JSON.stringify(buildTeamsCard(payload));
     expect(unlinked).not.toContain('Action.OpenUrl');
+    expect(unlinked).not.toContain('"Image"'); // the logo needs the site's address too
 
     // Anything that is not an http(s) address is ignored rather than linked.
-    expect(JSON.stringify(buildTeamsCard(payload, 'javascript:alert(1)'))).not.toContain('Action.OpenUrl');
+    expect(JSON.stringify(buildTeamsCard(payload, { appUrl: 'javascript:alert(1)' }))).not.toContain('Action.OpenUrl');
   });
 });
+
+/** Every TextBlock's text in a built card, in reading order, however deeply nested. */
+function cardTexts(card: unknown): string[] {
+  const out: string[] = [];
+  const walk = (node: unknown) => {
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (!node || typeof node !== 'object') return;
+    const obj = node as Record<string, unknown>;
+    if (obj['type'] === 'TextBlock' && typeof obj['text'] === 'string') out.push(obj['text']);
+    for (const key of ['attachments', 'content', 'body', 'items', 'columns']) if (key in obj) walk(obj[key]);
+  };
+  walk(card);
+  return out;
+}
 
 describe('the console channel', () => {
   it('is always available, so the engine works with no credentials at all', () => {

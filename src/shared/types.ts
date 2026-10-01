@@ -226,6 +226,12 @@ export interface Alert {
   owner_name: string | null;
   owner_email: string | null;
   /**
+   * For a missing-data alert: the fields to fill in, as labels ("Cost",
+   * "Renewal date"). Lets a message list them in a column rather than leave
+   * them inside a sentence. Absent on every other kind of alert.
+   */
+  missing?: string[];
+  /**
    * Stable identity for "this exact alert, at this exact lead step".
    * The notification log's UNIQUE constraint on this is what stops a person
    * being told the same thing every morning for sixty days.

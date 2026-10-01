@@ -482,11 +482,19 @@ describe('the missing-costs alert in Teams', () => {
     };
   };
 
-  const texts = () =>
-    card().attachments[0]!.content.body.flatMap((block) => {
-      const items = (block['items'] as Array<Record<string, unknown>> | undefined) ?? [block];
-      return items.map((i) => String(i['text'] ?? ''));
-    });
+  // Every TextBlock in the card, however deeply nested in columns.
+  const texts = () => {
+    const out: string[] = [];
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (!node || typeof node !== 'object') return;
+      const obj = node as Record<string, unknown>;
+      if (obj['type'] === 'TextBlock') out.push(String(obj['text'] ?? ''));
+      for (const key of ['items', 'columns']) if (key in obj) walk(obj[key]);
+    };
+    walk(card().attachments[0]!.content.body);
+    return out;
+  };
 
   it('gets its own section heading', () => {
     expect(texts().some((t) => t.startsWith('Monthly costs to enter'))).toBe(true);

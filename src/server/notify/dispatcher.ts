@@ -46,8 +46,8 @@ function buildPayload(alerts: Alert[], kind: 'alerts' | 'digest'): NotificationP
     kind === 'digest'
       ? `${SUBJECT_PREFIX}week ahead (${alerts.length} item${alerts.length === 1 ? '' : 's'})`
       : critical > 0
-        ? `${SUBJECT_PREFIX}${critical} urgent item${critical === 1 ? '' : 's'}`
-        : `${SUBJECT_PREFIX}${alerts.length} item${alerts.length === 1 ? '' : 's'} need attention`;
+        ? `${SUBJECT_PREFIX}${critical} urgent item${critical === 1 ? ' needs' : 's need'} attention`
+        : `${SUBJECT_PREFIX}${alerts.length} item${alerts.length === 1 ? ' needs' : 's need'} attention`;
 
   return { title, text: formatAlertsText(alerts), alerts, kind };
 }

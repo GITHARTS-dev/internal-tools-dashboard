@@ -186,6 +186,7 @@ export function computeAlerts(
           tool.renewal_date,
           daysBetween(today, tool.renewal_date),
           `missing_data:${tool.id}:stale_renewal:${today.slice(0, 7)}`,
+          { missing: ['Current renewal date'] },
         ),
       );
     }
@@ -255,9 +256,10 @@ export function computeAlerts(
     // A record with no owner or no cost cannot prevent a missed payment, so an
     // incomplete row is itself a problem worth chasing. Re-raised monthly.
     const gaps: string[] = [];
-    if (!tool.owner_name && !tool.owner_email) gaps.push('no owner');
-    if (tool.cost_amount === null) gaps.push('no cost');
-    if (!tool.renewal_date) gaps.push('no renewal date');
+    const missing: string[] = [];
+    if (!tool.owner_name && !tool.owner_email) { gaps.push('no owner'); missing.push('Owner'); }
+    if (tool.cost_amount === null) { gaps.push('no cost'); missing.push('Cost'); }
+    if (!tool.renewal_date) { gaps.push('no renewal date'); missing.push('Renewal date'); }
     if (gaps.length > 0) {
       alerts.push(
         baseAlert(
@@ -269,6 +271,7 @@ export function computeAlerts(
           null,
           null,
           `missing_data:${tool.id}:${gaps.join('|')}:${today.slice(0, 7)}`,
+          { missing },
         ),
       );
     }

@@ -145,7 +145,11 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {summary ? (
+      {/*
+        Both charts are built only from payments marked paid. Until there is
+        one, they would be two empty frames, so the row is left out entirely.
+      */}
+      {summary && summary.paid_by_month.some((row) => row.amount > 0) ? (
         <div className="grid grid-main">
           <TrendCard summary={summary} />
           <YearCompareCard summary={summary} />

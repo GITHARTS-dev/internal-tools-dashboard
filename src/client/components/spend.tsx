@@ -245,24 +245,8 @@ export function TrendCard({ summary }: { summary: CeoSummary }) {
         <h2>What we paid, month by month</h2>
         <span className="hint">complete months, from the ledger</span>
       </div>
-      {window.every((row) => row.subscriptions + row.usage === 0) ? (
-        // A chart of twelve zeros drew a scale of "₹0.01, ₹0.01, 0" -- noise
-        // that looks like a fault. Say what fills it instead.
-        <NothingPaidYet />
-      ) : (
-        <StackedColumns points={points} series={series} currency={currency} />
-      )}
+      <StackedColumns points={points} series={series} currency={currency} />
     </section>
-  );
-}
-
-/** For the two charts built from paid payments, before any payment is marked paid. */
-function NothingPaidYet() {
-  return (
-    <EmptyState title="No payments recorded yet">
-      This shows money actually paid out, month by month. It fills in as payments are marked paid
-      on each tool’s page, and as monthly cloud costs are entered for our products.
-    </EmptyState>
   );
 }
 
@@ -306,11 +290,7 @@ export function YearCompareCard({ summary }: { summary: CeoSummary }) {
         <h2>This year against last</h2>
         <span className="hint">running total</span>
       </div>
-      {[...data.current, ...data.previous].every((v) => !v) ? (
-        <NothingPaidYet />
-      ) : (
-        <CumulativeCompare data={data} currency={currency} />
-      )}
+      <CumulativeCompare data={data} currency={currency} />
       {comparison.trailing_12 !== null && comparison.previous_12 !== null ? (
         <div className="compare">
           <div className="compare-item">

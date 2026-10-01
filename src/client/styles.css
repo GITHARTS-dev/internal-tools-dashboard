@@ -464,8 +464,12 @@ a:not(.nav-link):not(.btn):hover { text-decoration-color: currentColor; }
 .grid-kpi { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .grid-2 { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
 .grid-3 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
-.grid-main { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); align-items: start; }
+/* Side-by-side cards share a bottom edge: a short card beside a long one used
+   to stop half-way down, leaving a ragged gap under it. In a stacked column
+   the last card takes up the difference. */
+.grid-main { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); }
 .stack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.stack > .card:last-child { flex: 1; }
 @media (max-width: 980px) { .grid-main { grid-template-columns: 1fr; } }
 
 /* ----------------------------------------------------------------- hero */

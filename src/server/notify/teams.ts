@@ -251,11 +251,79 @@ function missingTable(alerts: Alert[], base: string | null): unknown[] {
   ];
 }
 
+export interface Mention {
+  name: string;
+  email: string;
+}
+
+/** "jane.doe@x.com" -> "Jane Doe", for an entry given without a name. */
+function nameFromEmail(email: string): string {
+  return email
+    .split('@')[0]!
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+/**
+ * The "Tag on urgent reminders" setting, as people. Each entry is
+ * "Name <email>" or a bare email, separated by commas, semicolons or new
+ * lines. An entry that is not an email address is dropped rather than sent
+ * to Teams as a mention it cannot resolve.
+ */
+export function parseMentions(raw: string): Mention[] {
+  const seen = new Set<string>();
+  const out: Mention[] = [];
+  for (const entry of raw.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean)) {
+    const named = entry.match(/^(.*?)\s*<([^<>\s]+)>$/);
+    const email = (named ? named[2]! : entry).trim();
+    if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email) || seen.has(email.toLowerCase())) continue;
+    seen.add(email.toLowerCase());
+    out.push({ name: named?.[1]?.trim() || nameFromEmail(email), email });
+  }
+  return out;
+}
+
+/**
+ * Who to tag, and the line that tags them -- or nothing.
+ *
+ * Only when something is due within the window, or already overdue. A card
+ * about a renewal a month out, or a record missing its cost, tags nobody: a
+ * mention on every card is a mention people learn to ignore, which is the one
+ * thing it exists to prevent.
+ */
+function mentionLine(alerts: Alert[], mentions: Mention[], withinDays: number) {
+  if (mentions.length === 0) return null;
+  const soon = alerts.filter((a) => a.days_until !== null && a.days_until <= withinDays).length;
+  if (soon === 0) return null;
+
+  const window = withinDays === 7 ? 'a week' : `${withinDays} day${withinDays === 1 ? '' : 's'}`;
+  const tags = mentions.map((m) => `<at>${m.name}</at>`).join(', ');
+  return {
+    block: {
+      type: 'TextBlock',
+      text: `${tags} — ${soon} ${soon === 1 ? 'item needs' : 'items need'} action within ${window}.`,
+      wrap: true,
+      weight: 'Bolder',
+      spacing: 'Small',
+    },
+    entities: mentions.map((m) => ({
+      type: 'mention',
+      text: `<at>${m.name}</at>`,
+      mentioned: { id: m.email, name: m.name },
+    })),
+  };
+}
+
 export interface TeamsCardOptions {
   /** The site's address (`APP_URL`), for the logo and every link. No links without it. */
   appUrl?: string;
   /** The business date of the run, for the header. */
   today?: IsoDate;
+  /** People to @mention when something is due within `mentionWithinDays`. */
+  mentions?: Mention[];
+  mentionWithinDays?: number;
 }
 
 export function buildTeamsCard(payload: NotificationPayload, options: TeamsCardOptions = {}): unknown {
@@ -272,6 +340,8 @@ export function buildTeamsCard(payload: NotificationPayload, options: TeamsCardO
       spacing: 'Medium',
     },
   ];
+  const tagged = mentionLine(payload.alerts, options.mentions ?? [], options.mentionWithinDays ?? 7);
+  if (tagged) body.push(tagged.block);
   if (payload.subtitle) {
     body.push({ type: 'TextBlock', text: payload.subtitle, wrap: true, isSubtle: true, spacing: 'Small' });
   }
@@ -325,7 +395,9 @@ export function buildTeamsCard(payload: NotificationPayload, options: TeamsCardO
           version: '1.4',
           // Teams otherwise renders a card at a fixed narrow width, which
           // wraps every detail line two or three times.
-          msteams: { width: 'Full' },
+          // Each <at>Name</at> in the text must match an entity here, or
+          // Teams shows it as plain text and notifies nobody.
+          msteams: { width: 'Full', ...(tagged ? { entities: tagged.entities } : {}) },
           body,
           ...(base
             ? {
@@ -357,6 +429,8 @@ export const teamsChannel: Channel = {
     const card = buildTeamsCard(payload, {
       appUrl: env['APP_URL'],
       today: todayInTimezone(settings.timezone),
+      mentions: parseMentions(settings.teams_mentions),
+      mentionWithinDays: settings.teams_mention_days,
     });
 
     try {

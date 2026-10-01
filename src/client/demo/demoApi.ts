@@ -135,6 +135,8 @@ function settings(): AppSettings {
     digest_weekday: Number(rawSettings['digest_weekday'] ?? DEFAULT_SETTINGS.digest_weekday),
     digest_horizon_days: Number(rawSettings['digest_horizon_days'] ?? DEFAULT_SETTINGS.digest_horizon_days),
     teams_webhook_url: rawSettings['teams_webhook_url'] ?? '',
+    teams_mentions: rawSettings['teams_mentions'] ?? '',
+    teams_mention_days: Number(rawSettings['teams_mention_days'] ?? DEFAULT_SETTINGS.teams_mention_days),
     email_from: rawSettings['email_from'] ?? '',
     email_to: rawSettings['email_to'] ?? '',
     reporting_currency: (

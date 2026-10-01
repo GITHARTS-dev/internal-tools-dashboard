@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { runReminders, weekKey } from '../src/server/reminders';
 import { consoleChannel } from '../src/server/notify/console';
-import { buildTeamsCard } from '../src/server/notify/teams';
+import { buildTeamsCard, parseMentions } from '../src/server/notify/teams';
 import { listNotifications } from '../src/server/repo/notifications';
 import { createTool, listTrash, trashTool } from '../src/server/repo/tools';
 import { createPayment } from '../src/server/repo/payments';
@@ -428,6 +428,49 @@ describe('Teams card', () => {
 
     // Anything that is not an http(s) address is ignored rather than linked.
     expect(JSON.stringify(buildTeamsCard(payload, { appUrl: 'javascript:alert(1)' }))).not.toContain('Action.OpenUrl');
+  });
+});
+
+describe('Teams @mentions', () => {
+  const due = (days: number | null, rule: Alert['rule'] = 'renewal_upcoming'): Alert => ({
+    rule, severity: 'warning', tool_id: 't', product_id: null, tool_name: 'Canva', payment_id: null,
+    title: 'Canva renews soon', detail: 'Auto-renews.', date: null, days_until: days, amount: null,
+    currency: 'INR', owner_name: 'Christian', owner_email: null, dedupe_key: `k${days}`,
+  });
+  const card = (alerts: Alert[], mentions = parseMentions('Srimathi Ravi <srimathi@x.com>, padmanaban.gk@x.com')) =>
+    (buildTeamsCard({ title: 'Tools & subscriptions: test', text: '', kind: 'alerts', alerts }, { mentions, mentionWithinDays: 7 }) as any)
+      .attachments[0].content;
+
+  it('reads "Name <email>" and bare emails, naming the bare ones from the address', () => {
+    expect(parseMentions('Srimathi Ravi <srimathi@x.com>; padmanaban.gk@x.com\nnot-an-email, SRIMATHI@x.com')).toEqual([
+      { name: 'Srimathi Ravi', email: 'srimathi@x.com' },
+      { name: 'Padmanaban Gk', email: 'padmanaban.gk@x.com' },
+    ]);
+  });
+
+  it('tags everyone, with a matching mention entity each, when something is due within the window', () => {
+    const content = card([due(3), due(30)]);
+    const text = cardTexts({ attachments: [{ content }] }).find((t) => t.includes('<at>'))!;
+    expect(text).toBe('<at>Srimathi Ravi</at>, <at>Padmanaban Gk</at> — 1 item needs action within a week.');
+    expect(content.msteams.entities).toEqual([
+      { type: 'mention', text: '<at>Srimathi Ravi</at>', mentioned: { id: 'srimathi@x.com', name: 'Srimathi Ravi' } },
+      { type: 'mention', text: '<at>Padmanaban Gk</at>', mentioned: { id: 'padmanaban.gk@x.com', name: 'Padmanaban Gk' } },
+    ]);
+  });
+
+  it('counts overdue items as due', () => {
+    const text = JSON.stringify(card([due(-4, 'payment_overdue')]));
+    expect(text).toContain('1 item needs action within a week');
+  });
+
+  it('tags nobody when nothing is that close -- a month-out renewal or a missing cost is not urgent', () => {
+    const content = card([due(30), due(null, 'missing_data')]);
+    expect(JSON.stringify(content)).not.toContain('<at>');
+    expect(content.msteams.entities).toBeUndefined();
+  });
+
+  it('tags nobody when no one is listed', () => {
+    expect(JSON.stringify(card([due(1)], []))).not.toContain('<at>');
   });
 });
 

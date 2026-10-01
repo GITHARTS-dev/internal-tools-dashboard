@@ -157,6 +157,13 @@ export interface AppSettings {
   digest_weekday: number;
   digest_horizon_days: number;
   teams_webhook_url: string;
+  /**
+   * People to @mention in the Teams card when something is due soon, as
+   * "Name <email>" or a bare email, separated by commas. Blank: no mentions.
+   */
+  teams_mentions: string;
+  /** Mention them when an item is due within this many days, or overdue. */
+  teams_mention_days: number;
   email_from: string;
   email_to: string;
   /** Currency any combined total is expressed in. */
@@ -182,6 +189,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   digest_weekday: 1,
   digest_horizon_days: 45,
   teams_webhook_url: '',
+  teams_mentions: '',
+  teams_mention_days: 7,
   email_from: '',
   email_to: '',
   reporting_currency: 'INR',

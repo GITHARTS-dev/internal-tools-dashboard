@@ -40,6 +40,8 @@ export async function getSettings(db: Db): Promise<AppSettings> {
     digest_weekday: parseNumber(raw['digest_weekday'], DEFAULT_SETTINGS.digest_weekday),
     digest_horizon_days: parseNumber(raw['digest_horizon_days'], DEFAULT_SETTINGS.digest_horizon_days),
     teams_webhook_url: raw['teams_webhook_url'] ?? '',
+    teams_mentions: raw['teams_mentions'] ?? '',
+    teams_mention_days: parseNumber(raw['teams_mention_days'], DEFAULT_SETTINGS.teams_mention_days),
     email_from: raw['email_from'] ?? '',
     email_to: raw['email_to'] ?? '',
     reporting_currency:

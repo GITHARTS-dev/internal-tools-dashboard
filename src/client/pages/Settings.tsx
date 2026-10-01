@@ -13,7 +13,7 @@ const CHANNEL_HELP: Record<string, string> = {
   console:
     'Always on. Writes what would be sent to the server log, so the reminder engine can be watched working with no credentials at all.',
   teams:
-    'Sends each reminder as a personal Teams chat to the people named in a Workflows flow (“When a Teams webhook request is received”, then one “Post card in a chat” step per person). Paste that flow’s URL below. No app registration or admin consent needed.',
+    'Posts each reminder card through a Teams Workflows flow (“When a Teams webhook request is received”), which delivers it to a group chat or to people individually. Paste that flow’s URL below. No app registration or admin consent needed.',
   email:
     'Inert until credentials exist. Set EMAIL_PROVIDER to “graph” (uses your existing M365 tenant, sends from your own domain) or “resend”, plus the matching secrets.',
 };
@@ -38,6 +38,8 @@ export default function Settings() {
       digest_weekday: String(s.digest_weekday),
       digest_horizon_days: String(s.digest_horizon_days),
       teams_webhook_url: s.teams_webhook_url,
+      teams_mentions: s.teams_mentions,
+      teams_mention_days: String(s.teams_mention_days),
       email_from: s.email_from,
       email_to: s.email_to,
       reporting_currency: s.reporting_currency,
@@ -72,6 +74,8 @@ export default function Settings() {
         digest_weekday: form['digest_weekday'] ?? '1',
         digest_horizon_days: form['digest_horizon_days'] ?? '45',
         teams_webhook_url: form['teams_webhook_url'] ?? '',
+        teams_mentions: form['teams_mentions'] ?? '',
+        teams_mention_days: form['teams_mention_days'] || '7',
         email_from: form['email_from'] ?? '',
         email_to: form['email_to'] ?? '',
         reporting_currency: (form['reporting_currency'] ?? 'INR').toUpperCase(),
@@ -242,6 +246,32 @@ export default function Settings() {
                 Who receives the chat is set in the flow itself, so adding or removing a person is
                 done there, not here. Use “Send test” above to check it reaches them.
               </span>
+            </div>
+
+            <div className="field wide">
+              <label htmlFor="teams_mentions">Tag on urgent reminders</label>
+              <textarea
+                id="teams_mentions"
+                rows={2}
+                value={form['teams_mentions'] ?? ''}
+                onChange={(e) => set('teams_mentions', e.target.value)}
+                placeholder="Srimathi Ravi <srimathi@yourcompany.com>, padmanaban.gk@yourcompany.com"
+              />
+              <span className="help">
+                These people are @mentioned, and so notified, only when something is due within the
+                days below or already overdue. Use their work email (sign-in name), separated by
+                commas; “Name &lt;email&gt;” sets how the tag reads. They must be in the chat.
+              </span>
+            </div>
+
+            <div className="field">
+              <label htmlFor="teams_mention_days">Tag when due within (days)</label>
+              <input
+                id="teams_mention_days"
+                inputMode="numeric"
+                value={form['teams_mention_days'] ?? ''}
+                onChange={(e) => set('teams_mention_days', e.target.value)}
+              />
             </div>
 
             <div className="field">

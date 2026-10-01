@@ -18,10 +18,21 @@ async function createTool(overrides: Record<string, unknown> = {}) {
 }
 
 describe('health', () => {
-  it('answers', async () => {
+  it('answers, having reached the database', async () => {
     const res = await api(env, 'GET', '/api/health');
     expect(res.status).toBe(200);
     expect(res.json.ok).toBe(true);
+    expect(res.json.database).toBe('ok');
+  });
+
+  it('answers 503 when the database cannot be reached, so a monitor raises it', async () => {
+    const broken = {
+      ...env,
+      DB: { prepare: () => ({ bind() { return this; }, first: () => Promise.reject(new Error('connection refused')) }) },
+    };
+    const res = await api(broken, 'GET', '/api/health');
+    expect(res.status).toBe(503);
+    expect(res.json).toMatchObject({ ok: false, database: 'unreachable' });
   });
 
   it('returns JSON, not HTML, for an unknown API route', async () => {

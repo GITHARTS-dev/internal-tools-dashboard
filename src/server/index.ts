@@ -28,11 +28,52 @@ import { awsRoutes } from './routes/aws';
 
 export const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
+/** Long enough for a cold connection to the pooler; short enough that a monitor sees a hang as down. */
+const HEALTH_DB_TIMEOUT_MS = 8000;
+
 app.use('/api/*', requireAuth());
 
-app.get('/api/health', (c) =>
-  c.json({ ok: true, env: c.env.APP_ENV ?? 'unknown', time: new Date().toISOString() }),
-);
+/**
+ * Is the site up -- including its database?
+ *
+ * Runs one trivial query, for two reasons. An outside uptime monitor calling
+ * this every few minutes is what keeps the Supabase free tier from pausing the
+ * project after a week without database activity; a health check that never
+ * touched the database would keep the Function warm but let Supabase sleep.
+ * And "up" with an unreachable database is not up, so that case answers 503
+ * and the monitor raises it.
+ *
+ * Still open without sign-in (see auth/middleware.ts), and says nothing about
+ * the data: the query reads no table.
+ */
+app.get('/api/health', async (c) => {
+  const started = Date.now();
+  let database: 'ok' | 'unreachable' = 'ok';
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      c.env.DB.prepare('SELECT 1').first(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('timed out')), HEALTH_DB_TIMEOUT_MS);
+      }),
+    ]);
+  } catch {
+    database = 'unreachable';
+  } finally {
+    clearTimeout(timer);
+  }
+
+  return c.json(
+    {
+      ok: database === 'ok',
+      env: c.env.APP_ENV ?? 'unknown',
+      database,
+      database_ms: Date.now() - started,
+      time: new Date().toISOString(),
+    },
+    database === 'ok' ? 200 : 503,
+  );
+});
 
 app.route('/api/tools', toolsRoutes);
 app.route('/api/payments', paymentsRoutes);

@@ -13,7 +13,6 @@ import {
   ProductsCard,
   SpendLead,
   TrendCard,
-  YearCompareCard,
 } from '../components/spend';
 
 /**
@@ -146,15 +145,13 @@ export default function Dashboard() {
       </div>
 
       {/*
-        Both charts are built only from payments marked paid. Until there is
-        one, they would be two empty frames, so the row is left out entirely.
+        Built only from payments marked paid, so left out until there is one
+        rather than drawn as an empty frame. Full width on its own: the
+        year-on-year card that used to sit beside it is switched off for now
+        (YearCompareCard in components/spend.tsx -- put it back in a
+        grid-main row with this one to restore it).
       */}
-      {summary && summary.paid_by_month.some((row) => row.amount > 0) ? (
-        <div className="grid grid-main">
-          <TrendCard summary={summary} />
-          <YearCompareCard summary={summary} />
-        </div>
-      ) : null}
+      {summary && summary.paid_by_month.some((row) => row.amount > 0) ? <TrendCard summary={summary} /> : null}
 
       {summary ? (
         <div className="grid grid-3">

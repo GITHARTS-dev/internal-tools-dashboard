@@ -135,7 +135,9 @@ export function SpendLead({
             <strong>
               <Money amount={summary.comparison.trailing_12} currency={currency} />
             </strong>{' '}
-            over the last 12 complete months — <Delta pct={summary.comparison.change_pct} />.
+            over the last 12 complete months.
+            {/* The change against the 12 months before (<Delta pct={summary.comparison.change_pct} />) is
+                switched off for now, along with the year-on-year card. */}
           </p>
         ) : null}
 

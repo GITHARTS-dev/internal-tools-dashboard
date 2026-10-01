@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, ApiError, type AwsImportResponse, type ImportResult, type ReminderRunResponse } from '../lib/api';
 import { useAsync } from '../lib/hooks';
-import { Badge, Banner, EmptyState, Loading, useToast } from '../components/ui';
+import { Badge, Banner, CurrencySelect, EmptyState, Loading, useToast } from '../components/ui';
 import { AlertRow } from '../components/ui';
 import { IconRefresh, IconSend } from '../components/icons';
 import { formatDate } from '../../shared/dates';
@@ -202,12 +202,10 @@ export default function Settings() {
 
             <div className="field">
               <label htmlFor="reporting_currency">Report combined totals in</label>
-              <input
+              <CurrencySelect
                 id="reporting_currency"
                 value={form['reporting_currency'] ?? ''}
-                maxLength={3}
-                style={{ textTransform: 'uppercase' }}
-                onChange={(e) => set('reporting_currency', e.target.value)}
+                onChange={(c) => set('reporting_currency', c)}
               />
               <span className="help">
                 The currency the cost summary is expressed in. Amounts in other currencies are
@@ -281,11 +279,10 @@ export default function Settings() {
 
             <div className="field">
               <label htmlFor="default_currency">Default currency</label>
-              <input
+              <CurrencySelect
                 id="default_currency"
                 value={form['default_currency'] ?? ''}
-                onChange={(e) => set('default_currency', e.target.value.toUpperCase())}
-                maxLength={3}
+                onChange={(c) => set('default_currency', c)}
               />
             </div>
           </div>

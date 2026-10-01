@@ -2,14 +2,12 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError } from '../lib/api';
 import { useAsync } from '../lib/hooks';
-import { Banner, Loading, useToast } from '../components/ui';
+import { Banner, CurrencySelect, Loading, useToast } from '../components/ui';
 import { parseMoneyInput, toDecimalString } from '../../shared/money';
-import {
-  BILLING_CYCLES,
-  CATEGORY_SUGGESTIONS,
-  CURRENCY_SUGGESTIONS,
-  TOOL_STATUSES,
-} from '../../shared/schema';
+import { BILLING_CYCLES, CATEGORY_SUGGESTIONS, TOOL_STATUSES } from '../../shared/schema';
+
+/** The category dropdown's "type a new one" choice. Not a value any tool can have. */
+const NEW_CATEGORY = '__new__';
 
 /**
  * One form for both adding and editing.
@@ -22,24 +20,24 @@ import {
 
 interface FormState {
   name: string; vendor: string; category: string; status: string;
-  owner_name: string; owner_email: string; department: string;
+  owner_name: string; owner_email: string;
   billing_cycle: string; cost: string; currency: string;
   seats_purchased: string; seats_used: string;
   renewal_date: string; auto_renew: boolean; cancellation_notice_days: string;
   account_ref: string; billing_email: string; payment_method: string;
-  vendor_url: string; started_on: string; notes: string;
+  started_on: string; notes: string;
   /** '' means bought SaaS; otherwise the internal product this cost belongs to. */
   internal_product_id: string;
 }
 
 const BLANK: FormState = {
   name: '', vendor: '', category: '', status: 'active',
-  owner_name: '', owner_email: '', department: '',
+  owner_name: '', owner_email: '',
   billing_cycle: 'monthly', cost: '', currency: 'INR',
   seats_purchased: '', seats_used: '',
   renewal_date: '', auto_renew: true, cancellation_notice_days: '0',
   account_ref: '', billing_email: '', payment_method: '',
-  vendor_url: '', started_on: '', notes: '', internal_product_id: '',
+  started_on: '', notes: '', internal_product_id: '',
 };
 
 const CYCLE_LABEL: Record<string, string> = {
@@ -65,6 +63,8 @@ export default function ToolForm() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // True while "New category…" is chosen and the name is being typed.
+  const [typingCategory, setTypingCategory] = useState(false);
 
   useEffect(() => {
     const tool = existing.data?.tool;
@@ -76,7 +76,6 @@ export default function ToolForm() {
       status: tool.status,
       owner_name: tool.owner_name ?? '',
       owner_email: tool.owner_email ?? '',
-      department: tool.department ?? '',
       billing_cycle: tool.billing_cycle,
       cost: toDecimalString(tool.cost_amount, tool.currency),
       currency: tool.currency,
@@ -88,7 +87,6 @@ export default function ToolForm() {
       account_ref: tool.account_ref ?? '',
       billing_email: tool.billing_email ?? '',
       payment_method: tool.payment_method ?? '',
-      vendor_url: tool.vendor_url ?? '',
       started_on: tool.started_on ?? '',
       notes: tool.notes ?? '',
       internal_product_id: tool.internal_product_id ?? '',
@@ -119,7 +117,6 @@ export default function ToolForm() {
       status: form.status,
       owner_name: form.owner_name,
       owner_email: form.owner_email,
-      department: form.department,
       // '' would be stored as an empty string; null is what "unattributed" means.
       internal_product_id: form.internal_product_id || null,
       billing_cycle: form.billing_cycle,
@@ -133,7 +130,6 @@ export default function ToolForm() {
       account_ref: form.account_ref,
       billing_email: form.billing_email,
       payment_method: form.payment_method,
-      vendor_url: form.vendor_url,
       started_on: form.started_on,
       notes: form.notes,
     };
@@ -161,6 +157,19 @@ export default function ToolForm() {
   if (editing && existing.loading && !existing.data) return <Loading rows={3} />;
 
   const err = (field: string) => fieldErrors[field];
+
+  // Every category any tool already uses, plus the usual ones, so a category
+  // added once (e.g. by an import) can be picked again. "Other" stays last.
+  const categories = [
+    ...new Set([
+      ...CATEGORY_SUGGESTIONS.filter((c) => c !== 'Other'),
+      ...(options.data?.categories ?? []),
+      ...(form.category && !typingCategory ? [form.category] : []),
+    ]),
+  ]
+    .filter((c) => c !== 'Other')
+    .sort((a, b) => a.localeCompare(b));
+  categories.push('Other');
 
   return (
     // noValidate: field errors come from the same Zod schema the API uses and
@@ -196,18 +205,33 @@ export default function ToolForm() {
 
           <div className="field">
             <label htmlFor="category">Category</label>
-            <input
+            <select
               id="category"
-              list="category-options"
-              value={form.category}
-              onChange={(e) => set('category', e.target.value)}
-              placeholder="Design"
-            />
-            <datalist id="category-options">
-              {[...new Set([...(options.data?.categories ?? []), ...CATEGORY_SUGGESTIONS])].map((c) => (
-                <option key={c} value={c} />
+              value={typingCategory ? NEW_CATEGORY : form.category}
+              onChange={(e) => {
+                const choice = e.target.value;
+                setTypingCategory(choice === NEW_CATEGORY);
+                set('category', choice === NEW_CATEGORY ? '' : choice);
+              }}
+            >
+              {form.category || typingCategory ? null : <option value="">Choose a category</option>}
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
               ))}
-            </datalist>
+              <option value={NEW_CATEGORY}>New category…</option>
+            </select>
+            {typingCategory ? (
+              <input
+                aria-label="New category name"
+                value={form.category}
+                onChange={(e) => set('category', e.target.value)}
+                placeholder="Name of the new category"
+                autoFocus
+                style={{ marginTop: 6 }}
+              />
+            ) : null}
           </div>
 
           <div className="field">
@@ -219,18 +243,6 @@ export default function ToolForm() {
                 </option>
               ))}
             </select>
-          </div>
-
-          <div className="field">
-            <label htmlFor="vendor_url">Vendor website</label>
-            <input
-              id="vendor_url"
-              value={form.vendor_url}
-              onChange={(e) => set('vendor_url', e.target.value)}
-              aria-invalid={Boolean(err('vendor_url'))}
-              placeholder="https://www.canva.com"
-            />
-            {err('vendor_url') ? <span className="error">{err('vendor_url')}</span> : null}
           </div>
 
           <div className="fieldset-title">Who owns it</div>
@@ -257,11 +269,6 @@ export default function ToolForm() {
               placeholder="priya@example.com"
             />
             {err('owner_email') ? <span className="error">{err('owner_email')}</span> : null}
-          </div>
-
-          <div className="field">
-            <label htmlFor="department">Department</label>
-            <input id="department" value={form.department} onChange={(e) => set('department', e.target.value)} />
           </div>
 
           <div className="field">
@@ -301,19 +308,12 @@ export default function ToolForm() {
 
           <div className="field">
             <label htmlFor="currency">Currency</label>
-            <input
+            <CurrencySelect
               id="currency"
-              list="currency-options"
               value={form.currency}
-              onChange={(e) => set('currency', e.target.value.toUpperCase())}
-              aria-invalid={Boolean(err('currency'))}
-              maxLength={3}
+              onChange={(c) => set('currency', c)}
+              invalid={Boolean(err('currency'))}
             />
-            <datalist id="currency-options">
-              {CURRENCY_SUGGESTIONS.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
             {err('currency') ? <span className="error">{err('currency')}</span> : null}
           </div>
 

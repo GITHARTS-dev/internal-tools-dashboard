@@ -192,7 +192,6 @@ export default function Tools() {
                       </td>
                       <td>
                         {tool.owner_name ?? <span className="cell-sub">Unassigned</span>}
-                        {tool.department ? <div className="cell-sub">{tool.department}</div> : null}
                       </td>
                       <td>{tool.category}</td>
                       <td>{CYCLE_LABEL[tool.billing_cycle] ?? tool.billing_cycle}</td>

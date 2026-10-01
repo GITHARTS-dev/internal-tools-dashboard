@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import { formatDate, relativeDays } from '../../shared/dates';
 import { formatMoney } from '../../shared/money';
+import { CURRENCY_SUGGESTIONS } from '../../shared/schema';
 import { IconCritical, IconInfo, IconWarning } from './icons';
 import type { Alert, Severity, ToolStatus } from '../../shared/types';
 
@@ -18,6 +19,41 @@ const SEVERITY_ICON: Record<Severity, typeof IconInfo> = {
   warning: IconWarning,
   info: IconInfo,
 };
+
+/**
+ * A real dropdown for a currency, used by every form that asks for one.
+ *
+ * It replaces a text box with suggestions, which a browser only lists
+ * filtered by what is already typed -- with "INR" filled in, the "list" showed
+ * INR and nothing else. A saved value outside the usual list (from an import,
+ * say) is still offered, so opening a record never silently changes it.
+ */
+export function CurrencySelect({
+  id,
+  value,
+  onChange,
+  invalid,
+}: {
+  id: string;
+  value: string;
+  onChange: (currency: string) => void;
+  invalid?: boolean;
+}) {
+  const current = value.trim().toUpperCase();
+  const options: string[] = [...CURRENCY_SUGGESTIONS];
+  if (current && !options.includes(current)) options.push(current);
+
+  return (
+    <select id={id} value={current} onChange={(e) => onChange(e.target.value)} aria-invalid={invalid || undefined}>
+      {current ? null : <option value="">Choose a currency</option>}
+      {options.map((c) => (
+        <option key={c} value={c}>
+          {c}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 export function Badge({
   tone = 'info',

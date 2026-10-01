@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import type { ProductCostsResponse } from '../lib/apiClient';
 import { ApiError } from '../lib/errors';
-import { Banner, EmptyState, useToast } from './ui';
+import { Banner, CurrencySelect, EmptyState, useToast } from './ui';
 import { IconEdit } from './icons';
 import { monthLabel } from './spend';
 import { addMonthsToYearMonth } from '../../shared/fx';
@@ -277,13 +277,11 @@ export default function MonthlyCosts({
 
             <div className="field">
               <label htmlFor="mc-currency">Currency</label>
-              <input
+              <CurrencySelect
                 id="mc-currency"
                 value={form.currency}
-                maxLength={3}
-                style={{ textTransform: 'uppercase' }}
-                onChange={(e) => set('currency', e.target.value)}
-                aria-invalid={errors['currency'] ? 'true' : undefined}
+                onChange={(c) => set('currency', c)}
+                invalid={Boolean(errors['currency'])}
               />
               {errors['currency'] ? <span className="error">{errors['currency']}</span> : null}
             </div>

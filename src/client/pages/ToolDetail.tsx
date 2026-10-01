@@ -191,16 +191,7 @@ export default function ToolDetail() {
               {tool.owner_name ?? <span style={{ color: 'var(--critical-text)' }}>Unassigned</span>}
               {tool.owner_email ? <div className="cell-sub">{tool.owner_email}</div> : null}
             </Detail>
-            <Detail label="Department">{tool.department ?? '—'}</Detail>
-            <Detail label="Vendor">
-              {tool.vendor_url ? (
-                <a href={tool.vendor_url} target="_blank" rel="noreferrer" style={{ color: 'var(--series-1)' }}>
-                  {tool.vendor ?? tool.vendor_url}
-                </a>
-              ) : (
-                tool.vendor ?? '—'
-              )}
-            </Detail>
+            <Detail label="Vendor">{tool.vendor ?? '—'}</Detail>
             <Detail label="Category">{tool.category}</Detail>
             <Detail label="Cost">
               {tool.cost_amount === null ? '—' : formatMoney(tool.cost_amount, tool.currency)}

@@ -10,12 +10,18 @@ import { recordAudit } from '../repo/audit';
 
 export const importExportRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-/** The canonical column set: what export writes and what import expects. */
+/**
+ * The canonical column set: what export writes and what import expects.
+ *
+ * No `department` or `vendor_url`: both were dropped from the app as fields
+ * nobody fills in. The database columns remain, unused, so no migration was
+ * needed; an import now leaves them empty.
+ */
 export const TOOL_CSV_COLUMNS = [
-  'name', 'vendor', 'category', 'status', 'owner_name', 'owner_email', 'department',
+  'name', 'vendor', 'category', 'status', 'owner_name', 'owner_email',
   'billing_cycle', 'cost', 'currency', 'seats_purchased', 'seats_used', 'renewal_date',
   'auto_renew', 'cancellation_notice_days', 'account_ref', 'billing_email',
-  'payment_method', 'vendor_url', 'started_on', 'cancelled_on', 'notes',
+  'payment_method', 'started_on', 'cancelled_on', 'notes',
 ] as const;
 
 importExportRoutes.get('/export/tools.csv', async (c) => {
@@ -75,7 +81,6 @@ importExportRoutes.get('/export/template.csv', () => {
     status: 'active',
     owner_name: 'Priya Nair',
     owner_email: 'priya@example.com',
-    department: 'Marketing',
     billing_cycle: 'annual',
     cost: '14990.00',
     currency: 'INR',
@@ -87,7 +92,6 @@ importExportRoutes.get('/export/template.csv', () => {
     account_ref: 'CANVA-4821',
     billing_email: 'accounts@example.com',
     payment_method: 'HDFC corporate card',
-    vendor_url: 'https://www.canva.com',
     started_on: '2024-03-14',
     cancelled_on: '',
     notes: 'Shared across the design and marketing teams.',
@@ -158,7 +162,6 @@ importExportRoutes.post('/import', async (c) => {
       status: record['status'] || 'active',
       owner_name: record['owner_name'],
       owner_email: record['owner_email'],
-      department: record['department'],
       billing_cycle: record['billing_cycle'] || 'monthly',
       cost_amount: record['cost'] ? parseMoneyInput(record['cost'], currency) : null,
       currency,
@@ -170,7 +173,6 @@ importExportRoutes.post('/import', async (c) => {
       account_ref: record['account_ref'],
       billing_email: record['billing_email'],
       payment_method: record['payment_method'],
-      vendor_url: record['vendor_url'],
       notes: record['notes'],
       started_on: record['started_on'],
       cancelled_on: record['cancelled_on'],

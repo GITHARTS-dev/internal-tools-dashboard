@@ -201,10 +201,10 @@ function dropDemoRows(): void {
 }
 
 const TOOL_CSV_COLUMNS = [
-  'name', 'vendor', 'category', 'status', 'owner_name', 'owner_email', 'department',
+  'name', 'vendor', 'category', 'status', 'owner_name', 'owner_email',
   'billing_cycle', 'cost', 'currency', 'seats_purchased', 'seats_used', 'renewal_date',
   'auto_renew', 'cancellation_notice_days', 'account_ref', 'billing_email',
-  'payment_method', 'vendor_url', 'started_on', 'cancelled_on', 'notes',
+  'payment_method', 'started_on', 'cancelled_on', 'notes',
 ];
 
 export const demoApi = {

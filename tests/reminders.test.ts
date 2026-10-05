@@ -443,9 +443,25 @@ describe('Teams @mentions', () => {
 
   it('reads "Name <email>" and bare emails, naming the bare ones from the address', () => {
     expect(parseMentions('Srimathi Ravi <srimathi@x.com>; padmanaban.gk@x.com\nnot-an-email, SRIMATHI@x.com')).toEqual([
-      { name: 'Srimathi Ravi', email: 'srimathi@x.com' },
-      { name: 'Padmanaban Gk', email: 'padmanaban.gk@x.com' },
+      { name: 'Srimathi Ravi', id: 'srimathi@x.com' },
+      { name: 'Padmanaban Gk', id: 'padmanaban.gk@x.com' },
     ]);
+  });
+
+  it('accepts an Entra object ID with a name, for someone whose email is not their sign-in name', () => {
+    const oid = '87d349ed-44d7-43e1-9a83-5f2406dee5bd';
+    expect(parseMentions(`Naresh Kumar<${oid}>, ${oid}`)).toEqual([{ name: 'Naresh Kumar', id: oid }]);
+    const content = card([due(1)], parseMentions(`Naresh Kumar <${oid}>`));
+    expect(content.msteams.entities[0].mentioned).toEqual({ id: oid, name: 'Naresh Kumar' });
+  });
+
+  it('sends a one-line text summary beside the card, for a notification preview', () => {
+    const message = buildTeamsCard(
+      { title: 'Tools & subscriptions: 1 urgent item needs attention', text: '', kind: 'alerts', alerts: [due(1), due(3)] },
+      {},
+    ) as any;
+    expect(message.summary).toBe('1 urgent item needs attention: Canva renews soon and 1 more');
+    expect(message.attachments[0].content.fallbackText).toBe(message.summary);
   });
 
   it('tags everyone, with a matching mention entity each, when something is due within the window', () => {

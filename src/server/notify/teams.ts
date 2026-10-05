@@ -253,8 +253,17 @@ function missingTable(alerts: Alert[], base: string | null): unknown[] {
 
 export interface Mention {
   name: string;
-  email: string;
+  /**
+   * Who Teams should resolve: their Microsoft sign-in name (UPN) or their
+   * Entra object ID. Teams accepts nothing else -- a mailbox alias that is not
+   * the UPN still renders as a highlighted name, but opens no profile and
+   * notifies nobody.
+   */
+  id: string;
 }
+
+const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
+const OBJECT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** "jane.doe@x.com" -> "Jane Doe", for an entry given without a name. */
 function nameFromEmail(email: string): string {
@@ -268,19 +277,24 @@ function nameFromEmail(email: string): string {
 
 /**
  * The "Tag on urgent reminders" setting, as people. Each entry is
- * "Name <email>" or a bare email, separated by commas, semicolons or new
- * lines. An entry that is not an email address is dropped rather than sent
- * to Teams as a mention it cannot resolve.
+ * "Name <sign-in>" or a bare sign-in, separated by commas, semicolons or new
+ * lines, where the sign-in is a UPN (an email-shaped address) or an Entra
+ * object ID. An object ID always resolves, so it is the fix for someone whose
+ * email differs from their UPN; it needs a name, since none can be read from
+ * it. Anything else is dropped rather than sent to Teams as a mention it
+ * cannot resolve.
  */
 export function parseMentions(raw: string): Mention[] {
   const seen = new Set<string>();
   const out: Mention[] = [];
   for (const entry of raw.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean)) {
     const named = entry.match(/^(.*?)\s*<([^<>\s]+)>$/);
-    const email = (named ? named[2]! : entry).trim();
-    if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email) || seen.has(email.toLowerCase())) continue;
-    seen.add(email.toLowerCase());
-    out.push({ name: named?.[1]?.trim() || nameFromEmail(email), email });
+    const id = (named ? named[2]! : entry).trim();
+    const name = named?.[1]?.trim();
+    if (!EMAIL_RE.test(id) && !(OBJECT_ID_RE.test(id) && name)) continue;
+    if (seen.has(id.toLowerCase())) continue;
+    seen.add(id.toLowerCase());
+    out.push({ name: name || nameFromEmail(id), id });
   }
   return out;
 }
@@ -311,9 +325,24 @@ function mentionLine(alerts: Alert[], mentions: Mention[], withinDays: number) {
     entities: mentions.map((m) => ({
       type: 'mention',
       text: `<at>${m.name}</at>`,
-      mentioned: { id: m.email, name: m.name },
+      mentioned: { id: m.id, name: m.name },
     })),
   };
+}
+
+/**
+ * One line of plain text saying what the card is about: "1 urgent item needs
+ * attention: test-2 renews tomorrow". Teams shows "No message preview" for a
+ * card posted by the Workflows bot, and the card format has no field for one,
+ * so this travels beside the card for the workflow to post as text (see
+ * DEPLOYMENT.md, step 5), and as the card's fallback text.
+ */
+export function cardSummary(payload: NotificationPayload): string {
+  const lead = headline(payload.title);
+  const [first, ...rest] = payload.alerts;
+  if (!first) return lead;
+  const more = rest.length > 0 ? ` and ${rest.length} more` : '';
+  return `${lead}: ${first.title}${more}`;
 }
 
 export interface TeamsCardOptions {
@@ -384,8 +413,10 @@ export function buildTeamsCard(payload: NotificationPayload, options: TeamsCardO
     spacing: 'Large',
   });
 
+  const summary = cardSummary(payload);
   return {
     type: 'message',
+    summary,
     attachments: [
       {
         contentType: 'application/vnd.microsoft.card.adaptive',
@@ -393,6 +424,7 @@ export function buildTeamsCard(payload: NotificationPayload, options: TeamsCardO
           $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
           type: 'AdaptiveCard',
           version: '1.4',
+          fallbackText: summary,
           // Teams otherwise renders a card at a fixed narrow width, which
           // wraps every detail line two or three times.
           // Each <at>Name</at> in the text must match an entity here, or

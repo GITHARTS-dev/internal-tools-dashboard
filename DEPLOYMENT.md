@@ -326,6 +326,29 @@ Build it once, signed in as either recipient:
 Labels shift a little between Teams versions; the shape is always trigger →
 loop over attachments → one post-to-chat step per person.
 
+**Optional: a readable notification.** Teams shows a card posted by the
+Workflows bot as "No message preview" in notifications and the chat list, and
+the card format has no field to change that. The app sends a one-line summary
+beside the card ("1 urgent item needs attention: test-2 renews tomorrow") for
+this. After each **Post card** step, add **Post message in a chat or channel**
+with the same Post as / Post in / recipient (or chat), and the Message set
+through **fx** to:
+
+```
+triggerBody()?['summary']
+```
+
+The line then arrives just after the card, so it is what the notification and
+the chat list show. The cost is a second short message per reminder.
+
+**Tags.** The people in **Settings → Tag on urgent reminders** are mentioned by
+the address given there, and Teams only recognises the address someone signs in
+with (their UPN). A highlighted name whose profile card says "Your request can't
+be completed right now" was not recognised, and that person was not notified.
+Check their sign-in address (their Teams profile, or Entra admin center → Users
+→ User principal name) and use that, or their **Object ID** from the same page
+as `Name <object ID>`.
+
 The **"Send webhook alerts to a chat"** template is the simpler alternative: it
 posts everything into one chat you pick, with no loop to build. Pick a group
 chat containing everyone who should be told, and changing recipients later is
@@ -564,6 +587,8 @@ entries are here for when the symptom comes back from a configuration change.
 | Signed in, but every page says "Your sign-in has expired" | Static Web Apps overwrites the `Authorization` header before the API sees it | The browser sends the token as `x-access-token` instead (already done). If it recurs, check `AAD_TENANT_ID` / `AAD_CLIENT_ID` in Azure for typos or trailing spaces, then paste the `x-access-token` from the browser's Network tab into <https://jwt.ms> and compare its `aud`, `iss` and `tid` |
 | "Sign-in didn't complete: state_mismatch" | A stale sign-in attempt in that tab, typically from before the redirect URI existed, or storage cleared mid-attempt | Close every tab of the site and open it in a fresh private window |
 | `curl <site>/api/dashboard` with no token says "sign-in has expired", not "Sign in required" | Expected: Static Web Apps put its own value in `Authorization`, which is refused | Nothing to fix; it confirms the token check is on |
+| A tagged name in the Teams card opens no profile ("Your request can't be completed right now") | The address in **Tag on urgent reminders** is not that person's sign-in name (UPN), so Teams could not resolve it and did not notify them | Use their UPN, or `Name <object ID>` from Entra admin center → Users (step 5, **Tags**) |
+| Teams notifications for reminders say "No message preview" | Teams has no preview text for cards posted by the Workflows bot | Add the optional summary step (step 5) |
 | Teams run history: "message body is invalid JSON" | The Adaptive Card field received the card as an object, or the expression as plain text | Use `string(items('Apply_to_each')?['content'])`, entered through **fx** (step 5) |
 | A developer's local `npm run dev` stays on SQLite despite `DATABASE_URL` in `.env.local` | Their copy predates `.env.local` loading, or the file is `.env.local.txt` | `git pull`, check the file name, restart |
 | `'concurrently' is not recognized` | `npm install` not run after cloning | `npm install` |

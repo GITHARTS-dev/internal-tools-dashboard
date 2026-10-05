@@ -45,6 +45,8 @@ export interface Tool {
   /** Set when this tool is in the trash. It is excluded from every list until purged or restored. */
   deleted_at: string | null;
   deleted_by: string | null;
+  /** The latest due date the daily job has scheduled a payment for. Set by the job only. */
+  payments_scheduled_through?: IsoDate | null;
 }
 
 export type InternalProductStatus = 'live' | 'building' | 'retired';
@@ -90,6 +92,20 @@ export interface ProductCost {
   note: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** One change to a tool's price, from a date. See migrations/0007. */
+export interface PriceChange {
+  id: string;
+  tool_id: string;
+  effective_from: IsoDate;
+  amount: number;
+  currency: string;
+  previous_amount: number | null;
+  previous_currency: string | null;
+  note: string | null;
+  changed_by: string | null;
+  created_at: string;
 }
 
 export interface Payment {

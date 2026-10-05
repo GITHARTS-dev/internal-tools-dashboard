@@ -180,6 +180,22 @@ export const paymentCreateSchema = z.object({
   notes: optText(2000),
 });
 
+/**
+ * A change to a tool's price from a given date. Amount is minor units; leaving
+ * the currency out keeps the tool's own.
+ */
+export const priceChangeSchema = z.object({
+  amount: z.coerce.number().int('Enter a whole number of minor units').min(0, 'A price cannot be negative'),
+  currency: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z]{3}$/, 'Use a 3-letter currency code such as USD')
+    .optional(),
+  effective_from: z.string().refine(isIsoDate, 'Give the date the new price starts'),
+  note: optText(300),
+});
+
 export const paymentUpdateSchema = paymentCreateSchema.partial().omit({ tool_id: true });
 
 export const markPaidSchema = z.object({
@@ -209,4 +225,5 @@ export type ToolCreateInput = z.infer<typeof toolCreateSchema>;
 export type ToolUpdateInput = z.infer<typeof toolUpdateSchema>;
 export type PaymentCreateInput = z.infer<typeof paymentCreateSchema>;
 export type PaymentUpdateInput = z.infer<typeof paymentUpdateSchema>;
+export type PriceChangeInput = z.infer<typeof priceChangeSchema>;
 export type DocumentCreateInput = z.infer<typeof documentCreateSchema>;

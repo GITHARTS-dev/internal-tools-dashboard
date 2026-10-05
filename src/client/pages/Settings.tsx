@@ -6,6 +6,7 @@ import { Badge, Banner, CurrencySelect, EmptyState, Loading, useToast } from '..
 import { AlertRow } from '../components/ui';
 import { IconRefresh, IconSend } from '../components/icons';
 import { formatDate } from '../../shared/dates';
+import { formatMoney } from '../../shared/money';
 
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -925,6 +926,22 @@ function DryRunPanel() {
             On {formatDate(result.today)} ({result.timezone}), {result.alerts.length} alert
             {result.alerts.length === 1 ? '' : 's'} would be computed.
           </Banner>
+
+          {result.scheduled_payments && result.scheduled_payments.length > 0 ? (
+            <div style={{ marginTop: 12, fontSize: 13 }}>
+              <strong>
+                {result.scheduled_payments.length} payment{result.scheduled_payments.length === 1 ? '' : 's'} would be
+                added:
+              </strong>
+              <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: 'var(--text-secondary)' }}>
+                {result.scheduled_payments.map((p) => (
+                  <li key={`${p.tool_id}-${p.due_date}`}>
+                    {p.tool_name}: {formatMoney(p.amount, p.currency)} due {formatDate(p.due_date)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
             {result.alert_dispatch.channels.map((channel) => (

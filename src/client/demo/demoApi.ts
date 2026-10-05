@@ -20,7 +20,7 @@ import {
   computePaidByMonth,
   computeRenewalTimeline,
 } from '../../shared/metrics';
-import { advanceByCycle } from '../../shared/dates';
+import { addDays, advanceByCycle } from '../../shared/dates';
 import { parseCsv, toCsv } from '../../shared/csv';
 import { parseMoneyInput, toDecimalString } from '../../shared/money';
 import {
@@ -42,9 +42,11 @@ import {
   type DataStatus,
   type InternalProduct,
   type Payment,
+  type PriceChange,
   type ProductCost,
   type Tool,
 } from '../../shared/types';
+import { priceOn } from '../../shared/prices';
 import { ApiError } from '../lib/errors';
 
 export const DEMO_TODAY = '2026-09-18';
@@ -61,6 +63,7 @@ const source = snapshot as unknown as Snapshot;
 let tools: Tool[] = structuredClone(source.tools);
 let payments: Payment[] = structuredClone(source.payments);
 let audit: AuditEntry[] = structuredClone(source.audit);
+let priceChanges: PriceChange[] = [];
 let rawSettings: Record<string, string> = { ...source.settings };
 
 let internalProducts: InternalProduct[] = [];
@@ -276,7 +279,48 @@ export const demoApi = {
       audit: audit.filter((a) => a.entity === 'tool' && a.entity_id === id),
       documents: [],
       documents_enabled: false,
+      price_changes: priceChanges.filter((c) => c.tool_id === id),
     });
+  },
+
+  /** The same rule as the server's recordPriceChange, held in memory. */
+  async changePrice(toolId: string, body: unknown) {
+    const index = tools.findIndex((t) => t.id === toolId);
+    if (index === -1) throw new ApiError('No such tool.', 404);
+    const input = body as { amount: number; currency?: string; effective_from: string; note?: string | null };
+    const tool = tools[index]!;
+    const currency = input.currency ?? tool.currency;
+    const previous = priceOn(tool, priceChanges, addDays(input.effective_from, -1));
+
+    priceChanges = priceChanges.filter((c) => !(c.tool_id === toolId && c.effective_from === input.effective_from));
+    const change: PriceChange = {
+      id: uid(),
+      tool_id: toolId,
+      effective_from: input.effective_from,
+      amount: input.amount,
+      currency,
+      previous_amount: previous?.amount ?? null,
+      previous_currency: previous?.currency ?? null,
+      note: input.note ?? null,
+      changed_by: 'demo',
+      created_at: now(),
+    };
+    priceChanges.push(change);
+
+    const current = priceOn(tool, priceChanges, DEMO_TODAY);
+    if (current) tools[index] = { ...tool, cost_amount: current.amount, currency: current.currency, updated_at: now() };
+
+    let repriced = 0;
+    payments = payments.map((p) => {
+      if (p.tool_id !== toolId || p.status !== 'due' || p.due_date < input.effective_from) return p;
+      const price = priceOn(tools[index]!, priceChanges, p.due_date);
+      if (!price || (price.amount === p.amount && price.currency === p.currency)) return p;
+      repriced += 1;
+      return { ...p, amount: price.amount, currency: price.currency, updated_at: now() };
+    });
+
+    record('tool', toolId, 'update', `Price changes to ${formatMoney(input.amount, currency)} from ${input.effective_from}`);
+    return reply({ price_change: change, tool: tools[index]!, repriced });
   },
 
   async createTool(body: unknown) {

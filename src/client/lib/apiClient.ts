@@ -12,6 +12,7 @@ import type {
   KpiSummary,
   NotificationEntry,
   Payment,
+  PriceChange,
   ProductCost,
   RenewalTimelineEntry,
   Tool,
@@ -99,6 +100,7 @@ export interface ToolDetailResponse {
   audit: AuditEntry[];
   documents: ToolDocument[];
   documents_enabled: boolean;
+  price_changes?: PriceChange[];
 }
 
 export interface ImportResult {
@@ -111,6 +113,8 @@ export interface ReminderRunResponse {
   today: string;
   timezone: string;
   alerts: Alert[];
+  /** Payments the run added to the ledger, or would add in a dry run. */
+  scheduled_payments?: Array<{ tool_id: string; tool_name: string; due_date: string; amount: number; currency: string }>;
   dry_run: boolean;
   alert_dispatch: {
     considered: number;
@@ -221,6 +225,11 @@ export const api = {
 
   tool: (id: string) => request<ToolDetailResponse>(`/tools/${id}`),
   createTool: (body: unknown) => request<{ tool: Tool }>('/tools', { method: 'POST', ...json(body) }),
+  changePrice: (id: string, body: unknown) =>
+    request<{ price_change: PriceChange; tool: Tool; repriced: number }>(`/tools/${id}/price-changes`, {
+      method: 'POST',
+      ...json(body),
+    }),
   updateTool: (id: string, body: unknown) =>
     request<{ tool: Tool }>(`/tools/${id}`, { method: 'PATCH', ...json(body) }),
   archiveTool: (id: string, cancelled_on?: string) =>

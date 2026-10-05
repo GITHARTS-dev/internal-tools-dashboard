@@ -1,10 +1,15 @@
 import { computeAlerts } from '../shared/alerts';
+import { paymentsToSchedule } from '../shared/schedule';
 import { isoWeekday, todayInTimezone } from '../shared/dates';
-import type { Alert, AppSettings, IsoDate } from '../shared/types';
+import { changesByTool } from '../shared/prices';
+import type { Alert, AppSettings, IsoDate, Payment, PriceChange, Tool } from '../shared/types';
 import type { Db } from './repo/db';
 import { getSettings } from './repo/settings';
-import { listAllTools, purgeOldTrash } from './repo/tools';
-import { listPayments } from './repo/payments';
+import { listAllTools, markPaymentsScheduledThrough, purgeOldTrash } from './repo/tools';
+import { createPayment, listPayments } from './repo/payments';
+import { recordAudit } from './repo/audit';
+import { listPriceChanges } from './repo/priceChanges';
+import { syncCurrentPrice } from './pricing';
 import { listInternalProducts } from './repo/internalProducts';
 import { listAllProductCosts } from './repo/productCosts';
 import { consoleChannel } from './notify/console';
@@ -28,9 +33,19 @@ export interface ReminderRun {
   today: IsoDate;
   timezone: string;
   alerts: Alert[];
+  /** Payments added to the ledger by this run (or that would be, in a dry run). */
+  scheduled_payments: ScheduledPayment[];
   alert_dispatch: DispatchReport;
   digest_dispatch: DispatchReport | null;
   dry_run: boolean;
+}
+
+export interface ScheduledPayment {
+  tool_id: string;
+  tool_name: string;
+  due_date: IsoDate;
+  amount: number;
+  currency: string;
 }
 
 export interface RunOptions {
@@ -86,8 +101,18 @@ export async function runReminders(
   // previews what would be sent and must not change anything, this included.
   if (!dryRun) await purgeOldTrash(db);
 
+  const priceChanges = await listPriceChanges(db);
+  // A price change dated today or earlier becomes the tool's cost, so the
+  // dashboard's run-rate moves on the day the new price starts.
+  if (!dryRun) {
+    for (const [toolId, changes] of changesByTool(priceChanges)) {
+      await syncCurrentPrice(db, toolId, changes, today, 'system');
+    }
+  }
+
   const tools = await listAllTools(db);
   const payments = await listPayments(db);
+  const scheduled = await scheduleDuePayments(db, tools, payments, priceChanges, settings, today, dryRun);
   const [products, costs] = await Promise.all([listInternalProducts(db), listAllProductCosts(db)]);
   const productContext = { products, costs };
 
@@ -113,8 +138,76 @@ export async function runReminders(
     today,
     timezone: settings.timezone,
     alerts,
+    scheduled_payments: scheduled,
     alert_dispatch: alertDispatch,
     digest_dispatch: digestDispatch,
     dry_run: dryRun,
   };
+}
+
+/**
+ * Add each tool's next payment to the ledger once it comes into view, so
+ * nobody has to schedule bills by hand -- they only mark them paid.
+ *
+ * Runs before the alerts are computed and appends to `payments` in place, so a
+ * bill added this morning gets its "due soon" reminder this morning. A dry run
+ * appends the same rows in memory only, so the preview matches the real run.
+ */
+async function scheduleDuePayments(
+  db: Db,
+  tools: Tool[],
+  payments: Payment[],
+  priceChanges: PriceChange[],
+  settings: AppSettings,
+  today: IsoDate,
+  dryRun: boolean,
+): Promise<ScheduledPayment[]> {
+  const scheduled: ScheduledPayment[] = [];
+
+  for (const plan of paymentsToSchedule(tools, payments, settings, today, priceChanges)) {
+    if (!plan.already_in_ledger) {
+      const row = {
+        tool_id: plan.tool.id,
+        due_date: plan.due_date,
+        period_start: plan.period_start,
+        period_end: plan.period_end,
+        amount: plan.amount,
+        currency: plan.currency,
+        status: 'due' as const,
+      };
+      const payment: Payment = dryRun
+        ? {
+            ...row,
+            id: `dry-run-${plan.tool.id}-${plan.due_date}`,
+            paid_on: null,
+            paid_by: null,
+            invoice_ref: null,
+            invoice_url: null,
+            notes: null,
+            created_at: today,
+            updated_at: today,
+          }
+        : await createPayment(db, row as never);
+      payments.push(payment);
+      scheduled.push({
+        tool_id: plan.tool.id,
+        tool_name: plan.tool.name,
+        due_date: plan.due_date,
+        amount: plan.amount,
+        currency: plan.currency,
+      });
+
+      if (!dryRun) {
+        await recordAudit(db, {
+          entity: 'payment',
+          entity_id: payment.id,
+          action: 'create',
+          actor: 'system',
+          summary: `Scheduled ${plan.tool.name}'s payment due ${plan.due_date} automatically`,
+        });
+      }
+    }
+    if (!dryRun) await markPaymentsScheduledThrough(db, plan.tool.id, plan.due_date);
+  }
+  return scheduled;
 }

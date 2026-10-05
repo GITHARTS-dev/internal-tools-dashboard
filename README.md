@@ -113,6 +113,26 @@ Every alert carries a `dedupe_key` naming its lead step. The notification log
 has a UNIQUE index on it, which is what stops someone being told about the same
 renewal every morning for sixty days.
 
+### Payments schedule themselves
+
+The same daily run adds each live tool's next payment to its ledger once the
+due date comes into view: any time in the current month, or earlier if the bill
+falls inside the payment reminder window. Nobody schedules bills by hand; they
+mark them paid. A payment someone removes stays removed: the tool remembers the
+last due date the job handled (`payments_scheduled_through`) and only schedules
+after it.
+
+### Prices change over time
+
+**Change price** on a tool (or on an unpaid bill, when the invoice shows a
+different amount) records a new price and the date it starts. Every bill is
+priced at the price in effect on its due date (`src/shared/prices.ts`), so bills
+from that date use the new price until the next change, unpaid bills already in
+the ledger are repriced, and paid bills keep what was paid. A change dated in
+the future leaves today's cost alone until the daily run reaches its start date.
+The tool page lists every price the tool has had. Changing the cost in the Edit
+form is the same thing, starting today.
+
 ### Previewing reminders
 
 `GET /api/reminders/dry-run?date=2026-11-01`, or the **Preview reminders** panel

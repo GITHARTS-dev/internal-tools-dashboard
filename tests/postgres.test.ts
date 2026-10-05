@@ -15,6 +15,8 @@ import { getSettings, updateSettings } from '../src/server/repo/settings';
 import { saveRates, listRates, fxStatus, rateTablesByMonth } from '../src/server/repo/fxRates';
 import { recordNotification, alreadySentKeys } from '../src/server/repo/notifications';
 import { recordAudit, listRecentAudit } from '../src/server/repo/audit';
+import { listPayments } from '../src/server/repo/payments';
+import { runReminders } from '../src/server/reminders';
 import { toolCreateSchema } from '../src/shared/schema';
 import { api, testEnv, toolPayload } from './db-helper';
 
@@ -211,6 +213,34 @@ describe('the HTTP API, on Postgres', () => {
     const res = await api(env(), 'GET', '/api/reminders/dry-run?date=2026-09-19');
     expect(res.status).toBe(200);
     expect(res.json.dry_run).toBe(true);
+  });
+
+  it('schedules a payment from the daily run and reprices it when the cost changes', async () => {
+    const created = await createTool(
+      ctx.db,
+      tool({ name: 'Scheduled on PG', billing_cycle: 'monthly', cost_amount: 2000, currency: 'USD', renewal_date: '2099-01-20' }),
+    );
+    const run = await runReminders(ctx.db, { APP_ENV: 'test' }, { today: '2099-01-05', channels: [] });
+    expect(run.scheduled_payments.map((p) => p.tool_id)).toContain(created.id);
+    expect((await getTool(ctx.db, created.id))?.payments_scheduled_through).toBe('2099-01-20');
+
+    const res = await api(env(), 'PATCH', `/api/tools/${created.id}`, { cost_amount: 2200 });
+    expect(res.status).toBe(200);
+    const [payment] = await listPayments(ctx.db, { toolId: created.id });
+    expect(payment?.amount).toBe(2200);
+
+    // A dated change, entered twice for the same date: the upsert corrects it.
+    for (const amount of [2600, 2500]) {
+      const change = await api(env(), 'POST', `/api/tools/${created.id}/price-changes`, {
+        amount,
+        effective_from: '2099-01-10',
+      });
+      expect(change.status).toBe(201);
+    }
+    const detail = await api(env(), 'GET', `/api/tools/${created.id}`);
+    expect(detail.json.price_changes.map((c: { amount: number }) => c.amount)).toEqual([2200, 2500]);
+    const [repriced] = await listPayments(ctx.db, { toolId: created.id });
+    expect(repriced?.amount).toBe(2500);
   });
 
   it('exports CSV', async () => {

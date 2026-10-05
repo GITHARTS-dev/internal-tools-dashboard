@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { toolCreateSchema, toolUpdateSchema, paymentCreateSchema } from '../../shared/schema';
+import { toolCreateSchema, toolUpdateSchema, paymentCreateSchema, priceChangeSchema } from '../../shared/schema';
 import { advanceByCycle, formatDate, todayInTimezone } from '../../shared/dates';
 import type { Env, Variables } from '../context';
 import { actor, db, featureDocuments, patchFrom, zodErrorResponse } from '../context';
@@ -20,6 +20,8 @@ import {
   updateTool,
 } from '../repo/tools';
 import { createPayment, listPayments } from '../repo/payments';
+import { listPriceChanges } from '../repo/priceChanges';
+import { recordPriceChange } from '../pricing';
 import { diffRecords, listAuditForEntity, recordAudit } from '../repo/audit';
 import { listDocuments } from '../repo/documents';
 import { getSettings } from '../repo/settings';
@@ -81,13 +83,55 @@ toolsRoutes.get('/:id', async (c) => {
   const tool = await getTool(db(c), id);
   if (!tool) return c.json({ error: 'not_found', message: 'No such tool.' }, 404);
 
-  const [payments, audit, documents] = await Promise.all([
+  const [payments, audit, documents, priceChanges] = await Promise.all([
     listPayments(db(c), { toolId: id }),
     listAuditForEntity(db(c), 'tool', id),
     featureDocuments(c) ? listDocuments(db(c), id) : Promise.resolve([]),
+    listPriceChanges(db(c), id),
   ]);
 
-  return c.json({ tool, payments, audit, documents, documents_enabled: featureDocuments(c) });
+  return c.json({
+    tool,
+    payments,
+    audit,
+    documents,
+    documents_enabled: featureDocuments(c),
+    price_changes: priceChanges,
+  });
+});
+
+/**
+ * Change a tool's price from a date: "Claude is $22 from 1 November".
+ *
+ * Bills due from that date use the new price until the next change; paid
+ * bills keep what was paid. The start date may be in the past (the invoice
+ * already showed the new price) or the future (the vendor announced it).
+ */
+toolsRoutes.post('/:id/price-changes', async (c) => {
+  const id = c.req.param('id');
+  const tool = await getTool(db(c), id);
+  if (!tool || tool.deleted_at) return c.json({ error: 'not_found', message: 'No such tool.' }, 404);
+
+  const parsed = priceChangeSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json(zodErrorResponse(parsed.error), 400);
+
+  const settings = await getSettings(db(c));
+  const result = await recordPriceChange(
+    db(c),
+    tool,
+    {
+      amount: parsed.data.amount,
+      currency: parsed.data.currency ?? tool.currency,
+      effective_from: parsed.data.effective_from,
+      note: parsed.data.note ?? null,
+    },
+    actor(c),
+    todayInTimezone(settings.timezone),
+  );
+  return c.json(
+    { price_change: result.change, tool: result.tool, repriced: result.repriced.length },
+    201,
+  );
 });
 
 toolsRoutes.patch('/:id', async (c) => {
@@ -116,6 +160,24 @@ toolsRoutes.patch('/:id', async (c) => {
       summary: `Updated ${changes.map((ch) => ch.field).join(', ')}`,
       changes,
     });
+  }
+
+  // A cost typed into the edit form is a price change starting today: it is
+  // recorded in the price history and reaches the bills not yet paid, the same
+  // as one made with "Change price". The edit above is already audited.
+  const priceChanged =
+    before.cost_amount !== tool.cost_amount || before.currency !== tool.currency;
+  if (priceChanged && before.cost_amount !== null && tool.cost_amount !== null) {
+    const settings = await getSettings(db(c));
+    const result = await recordPriceChange(
+      db(c),
+      before,
+      { amount: tool.cost_amount, currency: tool.currency, effective_from: todayInTimezone(settings.timezone), note: null },
+      actor(c),
+      todayInTimezone(settings.timezone),
+      { auditTool: false },
+    );
+    return c.json({ tool: result.tool });
   }
   return c.json({ tool });
 });

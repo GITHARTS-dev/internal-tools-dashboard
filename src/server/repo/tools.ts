@@ -116,6 +116,17 @@ export async function updateTool(db: Db, id: string, patch: ToolUpdateInput): Pr
 }
 
 /**
+ * Record that the daily job has handled this tool's payment due `dueDate`.
+ * Bookkeeping, not an edit, so `updated_at` is left alone.
+ */
+export async function markPaymentsScheduledThrough(db: Db, id: string, dueDate: string): Promise<void> {
+  await db
+    .prepare('UPDATE tools SET payments_scheduled_through = ? WHERE id = ?')
+    .bind(dueDate, id)
+    .run();
+}
+
+/**
  * Archiving, not deleting.
  *
  * The whole point of this system is that past tools stay answerable, so a tool

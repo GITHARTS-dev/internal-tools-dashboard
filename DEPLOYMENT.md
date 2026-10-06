@@ -341,13 +341,41 @@ triggerBody()?['summary']
 The line then arrives just after the card, so it is what the notification and
 the chat list show. The cost is a second short message per reminder.
 
-**Tags.** The people in **Settings → Tag on urgent reminders** are mentioned by
-the address given there, and Teams only recognises the address someone signs in
-with (their UPN). A highlighted name whose profile card says "Your request can't
-be completed right now" was not recognised, and that person was not notified.
-Check their sign-in address (their Teams profile, or Entra admin center → Users
-→ User principal name) and use that, or their **Object ID** from the same page
-as `Name <object ID>`.
+**Tags (group chat only).** The people in **Settings → Tag on urgent
+reminders** get "@Name" in the card. A mention written into the card itself is
+not resolved when the Flow bot posts it -- Teams highlights the name, but it
+opens no profile and notifies nobody -- so the app leaves the tagging to the
+workflow, which can make a real one from a plain email. The message lists who
+to tag as `mentions` (`placeholder`, `user`, `name`), longest name first. In
+a personal chat with the Flow bot, skip this: the person is notified anyway.
+
+1. Before the **Apply to each** over attachments, add **Initialize variable**:
+   Name `card`, Type **String**, Value through **fx**:
+   ```
+   string(triggerBody()?['attachments'][0]?['content'])
+   ```
+2. After it, add another **Apply to each** and rename it `For each mention`.
+   Its input, through **fx**:
+   ```
+   coalesce(triggerBody()?['mentions'], json('[]'))
+   ```
+3. Inside it, add **Get @mention token for a user** (Microsoft Teams). User,
+   through **fx**: `items('For_each_mention')?['user']` -- the plain email from
+   Settings.
+4. Still inside, add **Compose** with, through **fx**:
+   ```
+   replace(variables('card'), items('For_each_mention')?['placeholder'], replace(outputs('Get_@mention_token_for_a_user')?['body/atMention'], '"', '\"'))
+   ```
+   If the editor rejects the `outputs(...)` part, delete it and pick
+   **@mention** from the dynamic content list in its place. Then add **Set
+   variable** `card` to the Compose step's **Outputs**. (A variable cannot be
+   set from an expression that reads itself, hence the Compose.)
+5. In the **Post card** step (Post as **Flow bot**, Post in **Group chat**), set
+   the Adaptive Card to `variables('card')` through **fx**. It no longer needs
+   to sit inside the attachments loop; the message only ever has one card.
+
+Press **Send test** afterwards: its example reminder is due within the week, so
+everyone listed is tagged. Hover a name -- a real mention opens their profile.
 
 The **"Send webhook alerts to a chat"** template is the simpler alternative: it
 posts everything into one chat you pick, with no loop to build. Pick a group
@@ -587,7 +615,8 @@ entries are here for when the symptom comes back from a configuration change.
 | Signed in, but every page says "Your sign-in has expired" | Static Web Apps overwrites the `Authorization` header before the API sees it | The browser sends the token as `x-access-token` instead (already done). If it recurs, check `AAD_TENANT_ID` / `AAD_CLIENT_ID` in Azure for typos or trailing spaces, then paste the `x-access-token` from the browser's Network tab into <https://jwt.ms> and compare its `aud`, `iss` and `tid` |
 | "Sign-in didn't complete: state_mismatch" | A stale sign-in attempt in that tab, typically from before the redirect URI existed, or storage cleared mid-attempt | Close every tab of the site and open it in a fresh private window |
 | `curl <site>/api/dashboard` with no token says "sign-in has expired", not "Sign in required" | Expected: Static Web Apps put its own value in `Authorization`, which is refused | Nothing to fix; it confirms the token check is on |
-| A tagged name in the Teams card opens no profile ("Your request can't be completed right now") | The address in **Tag on urgent reminders** is not that person's sign-in name (UPN), so Teams could not resolve it and did not notify them | Use their UPN, or `Name <object ID>` from Entra admin center → Users (step 5, **Tags**) |
+| A tagged name in the Teams card opens no profile ("Your request can't be completed right now") | The mention was written into the card, which the Flow bot does not resolve; nobody was notified | Build the **Tags** steps in step 5, so the workflow makes each mention from the email |
+| The Teams card shows "@Srimathi Ravi" as plain text | Expected until the workflow has the **Tags** steps | Step 5, **Tags** |
 | Teams notifications for reminders say "No message preview" | Teams has no preview text for cards posted by the Workflows bot | Add the optional summary step (step 5) |
 | Teams run history: "message body is invalid JSON" | The Adaptive Card field received the card as an object, or the expression as plain text | Use `string(items('Apply_to_each')?['content'])`, entered through **fx** (step 5) |
 | A developer's local `npm run dev` stays on SQLite despite `DATABASE_URL` in `.env.local` | Their copy predates `.env.local` loading, or the file is `.env.local.txt` | `git pull`, check the file name, restart |

@@ -253,8 +253,12 @@ function missingTable(alerts: Alert[], base: string | null): unknown[] {
 
 export interface Mention {
   name: string;
-  email: string;
+  /** Their work email, or Entra object ID: whatever the workflow's mention action accepts. */
+  id: string;
 }
+
+const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
+const OBJECT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** "jane.doe@x.com" -> "Jane Doe", for an entry given without a name. */
 function nameFromEmail(email: string): string {
@@ -269,18 +273,21 @@ function nameFromEmail(email: string): string {
 /**
  * The "Tag on urgent reminders" setting, as people. Each entry is
  * "Name <email>" or a bare email, separated by commas, semicolons or new
- * lines. An entry that is not an email address is dropped rather than sent
- * to Teams as a mention it cannot resolve.
+ * lines. An Entra object ID works in place of the email, given with a name,
+ * since none can be read from it. Anything else is dropped rather than handed
+ * to Teams as someone it cannot find.
  */
 export function parseMentions(raw: string): Mention[] {
   const seen = new Set<string>();
   const out: Mention[] = [];
   for (const entry of raw.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean)) {
     const named = entry.match(/^(.*?)\s*<([^<>\s]+)>$/);
-    const email = (named ? named[2]! : entry).trim();
-    if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email) || seen.has(email.toLowerCase())) continue;
-    seen.add(email.toLowerCase());
-    out.push({ name: named?.[1]?.trim() || nameFromEmail(email), email });
+    const id = (named ? named[2]! : entry).trim();
+    const name = named?.[1]?.trim();
+    if (!EMAIL_RE.test(id) && !(OBJECT_ID_RE.test(id) && name)) continue;
+    if (seen.has(id.toLowerCase())) continue;
+    seen.add(id.toLowerCase());
+    out.push({ name: name || nameFromEmail(id), id });
   }
   return out;
 }
@@ -292,6 +299,15 @@ export function parseMentions(raw: string): Mention[] {
  * about a renewal a month out, or a record missing its cost, tags nobody: a
  * mention on every card is a mention people learn to ignore, which is the one
  * thing it exists to prevent.
+ *
+ * The card carries "@Name" as plain text, not a mention. A mention written
+ * into the card itself (`<at>` plus `msteams.entities`) is not resolved when
+ * Power Automate's Flow bot posts it: Teams highlights the name, but it opens
+ * no profile and notifies nobody. What Teams does resolve is the token from
+ * the workflow's own "Get @mention token for a user" action, which takes a
+ * plain email. So the message lists who to tag as `mentions`, and the workflow
+ * swaps each placeholder in the card for a real token before posting it
+ * (DEPLOYMENT.md, step 5). A workflow that does not still shows "@Name".
  */
 function mentionLine(alerts: Alert[], mentions: Mention[], withinDays: number) {
   if (mentions.length === 0) return null;
@@ -299,7 +315,7 @@ function mentionLine(alerts: Alert[], mentions: Mention[], withinDays: number) {
   if (soon === 0) return null;
 
   const window = withinDays === 7 ? 'a week' : `${withinDays} day${withinDays === 1 ? '' : 's'}`;
-  const tags = mentions.map((m) => `<at>${m.name}</at>`).join(', ');
+  const tags = mentions.map((m) => `@${m.name}`).join(', ');
   return {
     block: {
       type: 'TextBlock',
@@ -308,12 +324,27 @@ function mentionLine(alerts: Alert[], mentions: Mention[], withinDays: number) {
       weight: 'Bolder',
       spacing: 'Small',
     },
-    entities: mentions.map((m) => ({
-      type: 'mention',
-      text: `<at>${m.name}</at>`,
-      mentioned: { id: m.email, name: m.name },
-    })),
+    // Longest placeholder first, so swapping "@Ravi" can never eat the start
+    // of "@Ravi Kumar" when the workflow replaces them in order.
+    placeholders: mentions
+      .map((m) => ({ placeholder: `@${m.name}`, user: m.id, name: m.name }))
+      .sort((a, b) => b.placeholder.length - a.placeholder.length),
   };
+}
+
+/**
+ * One line of plain text saying what the card is about: "1 urgent item needs
+ * attention: test-2 renews tomorrow". Teams shows "No message preview" for a
+ * card posted by the Workflows bot, and the card format has no field for one,
+ * so this travels beside the card for the workflow to post as text (see
+ * DEPLOYMENT.md, step 5), and as the card's fallback text.
+ */
+export function cardSummary(payload: NotificationPayload): string {
+  const lead = headline(payload.title);
+  const [first, ...rest] = payload.alerts;
+  if (!first) return lead;
+  const more = rest.length > 0 ? ` and ${rest.length} more` : '';
+  return `${lead}: ${first.title}${more}`;
 }
 
 export interface TeamsCardOptions {
@@ -384,8 +415,11 @@ export function buildTeamsCard(payload: NotificationPayload, options: TeamsCardO
     spacing: 'Large',
   });
 
+  const summary = cardSummary(payload);
   return {
     type: 'message',
+    summary,
+    mentions: tagged ? tagged.placeholders : [],
     attachments: [
       {
         contentType: 'application/vnd.microsoft.card.adaptive',
@@ -393,11 +427,11 @@ export function buildTeamsCard(payload: NotificationPayload, options: TeamsCardO
           $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
           type: 'AdaptiveCard',
           version: '1.4',
+          fallbackText: summary,
           // Teams otherwise renders a card at a fixed narrow width, which
-          // wraps every detail line two or three times.
-          // Each <at>Name</at> in the text must match an entity here, or
-          // Teams shows it as plain text and notifies nobody.
-          msteams: { width: 'Full', ...(tagged ? { entities: tagged.entities } : {}) },
+          // wraps every detail line two or three times. No mention entities:
+          // the workflow adds real mentions (see mentionLine).
+          msteams: { width: 'Full' },
           body,
           ...(base
             ? {

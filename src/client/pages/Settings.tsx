@@ -260,8 +260,10 @@ export default function Settings() {
               />
               <span className="help">
                 These people are @mentioned, and so notified, only when something is due within the
-                days below or already overdue. Use their work email (sign-in name), separated by
-                commas; “Name &lt;email&gt;” sets how the tag reads. They must be in the chat.
+                days below or already overdue. Use their work email, separated by commas;
+                “Name &lt;email&gt;” sets how the tag reads. They must be in the chat, and the Teams
+                workflow must include the mention step (see the deployment guide), or the card shows
+                “@Name” as plain text.
               </span>
             </div>
 

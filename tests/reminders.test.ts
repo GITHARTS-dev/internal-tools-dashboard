@@ -437,25 +437,48 @@ describe('Teams @mentions', () => {
     title: 'Canva renews soon', detail: 'Auto-renews.', date: null, days_until: days, amount: null,
     currency: 'INR', owner_name: 'Christian', owner_email: null, dedupe_key: `k${days}`,
   });
-  const card = (alerts: Alert[], mentions = parseMentions('Srimathi Ravi <srimathi@x.com>, padmanaban.gk@x.com')) =>
-    (buildTeamsCard({ title: 'Tools & subscriptions: test', text: '', kind: 'alerts', alerts }, { mentions, mentionWithinDays: 7 }) as any)
-      .attachments[0].content;
+  const message = (alerts: Alert[], mentions = parseMentions('Srimathi Ravi <srimathi@x.com>, padmanaban.gk@x.com')) =>
+    buildTeamsCard({ title: 'Tools & subscriptions: test', text: '', kind: 'alerts', alerts }, { mentions, mentionWithinDays: 7 }) as any;
+  const card = (alerts: Alert[], mentions?: ReturnType<typeof parseMentions>) =>
+    message(alerts, mentions).attachments[0].content;
 
   it('reads "Name <email>" and bare emails, naming the bare ones from the address', () => {
     expect(parseMentions('Srimathi Ravi <srimathi@x.com>; padmanaban.gk@x.com\nnot-an-email, SRIMATHI@x.com')).toEqual([
-      { name: 'Srimathi Ravi', email: 'srimathi@x.com' },
-      { name: 'Padmanaban Gk', email: 'padmanaban.gk@x.com' },
+      { name: 'Srimathi Ravi', id: 'srimathi@x.com' },
+      { name: 'Padmanaban Gk', id: 'padmanaban.gk@x.com' },
     ]);
   });
 
-  it('tags everyone, with a matching mention entity each, when something is due within the window', () => {
-    const content = card([due(3), due(30)]);
-    const text = cardTexts({ attachments: [{ content }] }).find((t) => t.includes('<at>'))!;
-    expect(text).toBe('<at>Srimathi Ravi</at>, <at>Padmanaban Gk</at> — 1 item needs action within a week.');
-    expect(content.msteams.entities).toEqual([
-      { type: 'mention', text: '<at>Srimathi Ravi</at>', mentioned: { id: 'srimathi@x.com', name: 'Srimathi Ravi' } },
-      { type: 'mention', text: '<at>Padmanaban Gk</at>', mentioned: { id: 'padmanaban.gk@x.com', name: 'Padmanaban Gk' } },
+  it('accepts an Entra object ID given with a name', () => {
+    const oid = '87d349ed-44d7-43e1-9a83-5f2406dee5bd';
+    expect(parseMentions(`Naresh Kumar<${oid}>, ${oid}`)).toEqual([{ name: 'Naresh Kumar', id: oid }]);
+  });
+
+  it('writes "@Name" placeholders, and lists who they are for the workflow to swap in real mentions', () => {
+    const sent = message([due(3), due(30)]);
+    const text = cardTexts(sent).find((t) => t.startsWith('@'))!;
+    expect(text).toBe('@Srimathi Ravi, @Padmanaban Gk — 1 item needs action within a week.');
+    expect(sent.mentions).toEqual([
+      { placeholder: '@Srimathi Ravi', user: 'srimathi@x.com', name: 'Srimathi Ravi' },
+      { placeholder: '@Padmanaban Gk', user: 'padmanaban.gk@x.com', name: 'Padmanaban Gk' },
     ]);
+    // Hand-written mentions are what the Flow bot fails to resolve.
+    expect(JSON.stringify(sent)).not.toContain('<at>');
+    expect(sent.attachments[0].content.msteams).toEqual({ width: 'Full' });
+  });
+
+  it('lists the longest placeholder first, so one name that starts another is never half-replaced', () => {
+    const sent = message([due(1)], parseMentions('Ravi <ravi@x.com>, Ravi Kumar <ravi.kumar@x.com>'));
+    expect(sent.mentions.map((m: { placeholder: string }) => m.placeholder)).toEqual(['@Ravi Kumar', '@Ravi']);
+  });
+
+  it('sends a one-line text summary beside the card, for a notification preview', () => {
+    const sent = buildTeamsCard(
+      { title: 'Tools & subscriptions: 1 urgent item needs attention', text: '', kind: 'alerts', alerts: [due(1), due(3)] },
+      {},
+    ) as any;
+    expect(sent.summary).toBe('1 urgent item needs attention: Canva renews soon and 1 more');
+    expect(sent.attachments[0].content.fallbackText).toBe(sent.summary);
   });
 
   it('counts overdue items as due', () => {
@@ -464,13 +487,13 @@ describe('Teams @mentions', () => {
   });
 
   it('tags nobody when nothing is that close -- a month-out renewal or a missing cost is not urgent', () => {
-    const content = card([due(30), due(null, 'missing_data')]);
-    expect(JSON.stringify(content)).not.toContain('<at>');
-    expect(content.msteams.entities).toBeUndefined();
+    const sent = message([due(30), due(null, 'missing_data')]);
+    expect(JSON.stringify(sent.attachments)).not.toContain('@Srimathi');
+    expect(sent.mentions).toEqual([]);
   });
 
   it('tags nobody when no one is listed', () => {
-    expect(JSON.stringify(card([due(1)], []))).not.toContain('<at>');
+    expect(message([due(1)], []).mentions).toEqual([]);
   });
 });
 

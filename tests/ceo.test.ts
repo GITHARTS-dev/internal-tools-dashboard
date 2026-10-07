@@ -120,7 +120,7 @@ describe('computeCeoSummary', () => {
   it('values each past payment at its own months rate', () => {
     const result = computeCeoSummary({
       ...base,
-      tools: [],
+      tools: [tool({ status: 'cancelled' })],
       payments: [
         payment({ id: 'p1', currency: 'USD', amount: 100_00, paid_on: '2025-06-15' }),
         payment({ id: 'p2', currency: 'USD', amount: 100_00, paid_on: '2026-08-15' }),
@@ -190,7 +190,7 @@ describe('computeCeoSummary', () => {
   it('excludes the current month from the trend', () => {
     const result = computeCeoSummary({
       ...base,
-      tools: [],
+      tools: [tool({ status: 'cancelled' })],
       today: '2026-09-19',
       payments: [payment({ paid_on: '2026-09-10', currency: 'INR', amount: 999_00 })],
     });
@@ -211,7 +211,7 @@ describe('computeCeoSummary', () => {
   it('compares two like-for-like 12-month windows', () => {
     const result = computeCeoSummary({
       ...base,
-      tools: [],
+      tools: [tool({ status: 'cancelled' })],
       today: '2026-09-19',
       payments: [
         // Previous window (2024-09..2025-08): 100
@@ -231,13 +231,28 @@ describe('computeCeoSummary', () => {
   it('reports no percentage when there is nothing to compare against', () => {
     const result = computeCeoSummary({
       ...base,
-      tools: [],
+      tools: [tool({ status: 'cancelled' })],
       today: '2026-09-19',
       payments: [payment({ paid_on: '2026-01-10', currency: 'INR', amount: 150_00 })],
     });
     // Growth from zero is not a percentage; it is a start.
     expect(result.comparison.previous_12).toBe(0);
     expect(result.comparison.change_pct).toBeNull();
+  });
+
+  it('counts nothing for a tool in the Trash, paid or owed', () => {
+    // The Trash is left out of the tool list, so its payments have no tool.
+    const result = computeCeoSummary({
+      ...base,
+      tools: [],
+      payments: [
+        payment({ id: 'paid', paid_on: '2026-03-10', amount: 500_00 }),
+        payment({ id: 'owed', status: 'due', paid_on: null, due_date: '2026-10-09', amount: 19_999_00 }),
+      ],
+    });
+    expect(result.paid_items).toHaveLength(0);
+    expect(result.paid_by_year).toHaveLength(0);
+    expect(result.year_forecast.lines).toHaveLength(0);
   });
 
   it('ranks the biggest subscriptions, converted, and caps the list', () => {

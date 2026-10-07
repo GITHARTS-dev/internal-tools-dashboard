@@ -620,10 +620,16 @@ function MonthRows({
 
 const LINE_KIND: Record<YearForecastLine['kind'], string> = {
   overdue: 'Overdue',
-  due: 'Due, not paid',
+  scheduled: 'Scheduled',
   renewal: 'Next bill',
-  usage: 'Cloud usage, estimate',
 };
+
+/** The month after a product's last entered bill: where its unknown cloud usage starts. */
+function cloudGapFrom(entry: InternalProductCost, today: string): string | null {
+  if (entry.product.status === 'retired' || !entry.last_cost_month) return null;
+  const next = addMonthsToYearMonth(entry.last_cost_month, 1);
+  return next.slice(0, 4) === today.slice(0, 4) ? next : null;
+}
 
 function YearForecastSheet({
   summary,
@@ -645,35 +651,39 @@ function YearForecastSheet({
     itemsBetween(summary.paid_items, `${year}-01`, `${year}-12`).filter((item) => inFocus(focus, item.product_id)),
     currency,
   ).total;
-  const sumOf = (kinds: YearForecastLine['kind'][]) =>
-    lines.filter((l) => kinds.includes(l.kind)).reduce((s, l) => s + (l.amount_reported ?? 0), 0);
-  const owedLines = lines.filter((l) => l.kind === 'overdue' || l.kind === 'due');
-  const billLines = lines.filter((l) => l.kind === 'renewal');
-  const usageLines = lines.filter((l) => l.kind === 'usage');
-  const owed = sumOf(['overdue', 'due']);
-  const bills = sumOf(['renewal']);
-  const usage = sumOf(['usage']);
-  const total = paid + owed + bills + usage;
+  const overdueLines = lines.filter((l) => l.kind === 'overdue');
+  const comingLines = lines.filter((l) => l.kind !== 'overdue');
+  const total = (list: YearForecastLine[]) => list.reduce((s, l) => s + (l.amount_reported ?? 0), 0);
+  const overdue = total(overdueLines);
+  const coming = total(comingLines);
   const missingRate = lines.filter((l) => l.amount_reported === null).length;
+
+  // Products whose cloud usage for the rest of the year is not known yet.
+  const cloudGaps =
+    focus === 'subscriptions'
+      ? []
+      : summary.products
+          .map((entry) => ({ entry, from: cloudGapFrom(entry, summary.today) }))
+          .filter((row): row is { entry: InternalProductCost; from: string } => row.from !== null);
 
   const title =
     focus === 'subscriptions'
       ? `Subscriptions we buy in ${year}`
       : focus === 'products'
         ? `Running our own products in ${year}`
-        : `Expected for ${year}`;
+        : `Committed for ${year}`;
 
   return (
     <Sheet
-      kicker={`Forecast to 31 Dec ${year}`}
+      kicker={`To 31 Dec ${year}`}
       title={title}
-      subtitle="What has been paid so far, plus every bill still to come before the year ends. The bills are known amounts on known dates; only cloud usage is estimated."
+      subtitle="What has been paid so far, plus every subscription bill still to come before the year ends: known amounts on known dates. Cloud usage still to be billed is not included, because it changes with use."
       onClose={onClose}
     >
       <div className="drill-total">
-        <span className="drill-value">{formatMoney(total, currency)}</span>
+        <span className="drill-value">{formatMoney(paid + overdue + coming, currency)}</span>
         <span className="drill-note">
-          {formatMoney(paid, currency)} paid + {formatMoney(total - paid, currency)} still to come
+          {formatMoney(paid, currency)} paid + {formatMoney(overdue + coming, currency)} in bills not yet paid
         </span>
       </div>
 
@@ -686,27 +696,31 @@ function YearForecastSheet({
           </span>
         </button>
         <div className="drill-part">
-          <span className="drill-part-label">Due, not yet paid</span>
-          <strong>{formatMoney(owed, currency)}</strong>
+          <span className="drill-part-label">Overdue</span>
+          <strong>{formatMoney(overdue, currency)}</strong>
           <span className="drill-part-more">
-            {owedLines.length} {owedLines.length === 1 ? 'bill' : 'bills'} in the ledger
+            {overdueLines.length} {overdueLines.length === 1 ? 'bill' : 'bills'} past due
           </span>
         </div>
         <div className="drill-part">
           <span className="drill-part-label">Bills still to come</span>
-          <strong>{formatMoney(bills, currency)}</strong>
+          <strong>{formatMoney(coming, currency)}</strong>
           <span className="drill-part-more">
-            {billLines.length} on renewal dates
-          </span>
-        </div>
-        <div className="drill-part">
-          <span className="drill-part-label">Cloud, estimated</span>
-          <strong>{formatMoney(usage, currency)}</strong>
-          <span className="drill-part-more">
-            {usageLines.length} {usageLines.length === 1 ? 'month' : 'months'} at the average
+            {comingLines.length} before 31 Dec
           </span>
         </div>
       </div>
+
+      {cloudGaps.length > 0 ? (
+        <div className="drill-note-box">
+          <strong>Cloud usage after the last bill entered is not included.</strong>{' '}
+          {cloudGaps
+            .map(({ entry, from }) => `${entry.product.name} from ${shortMonth(from, false)}`)
+            .join(', ')}
+          . It changes month to month, so it is not predicted; each month joins the total once its bill
+          is entered on the product's page.
+        </div>
+      ) : null}
 
       {focus !== 'products' && forecast.undated_tools.length > 0 ? (
         <Banner tone="warning">
@@ -716,7 +730,7 @@ function YearForecastSheet({
               renewal date,
             </strong>{' '}
             so {forecast.undated_tools.length === 1 ? 'its bills' : 'their bills'} this year cannot be placed and
-            {forecast.undated_tools.length === 1 ? ' is' : ' are'} not in the forecast:{' '}
+            {forecast.undated_tools.length === 1 ? ' is' : ' are'} not included:{' '}
             {forecast.undated_tools.map((tool, i) => (
               <span key={tool.tool_id}>
                 {i > 0 ? ', ' : ''}
@@ -731,86 +745,44 @@ function YearForecastSheet({
       {missingRate > 0 ? (
         <Banner tone="warning">
           <span>
-            {missingRate} {missingRate === 1 ? 'amount is' : 'amounts are'} not in the forecast: no exchange
-            rate covered {missingRate === 1 ? 'it' : 'them'}. <Link to="/settings">Fetch rates in Settings</Link>.
+            {missingRate} {missingRate === 1 ? 'amount is' : 'amounts are'} not included: no exchange rate
+            covered {missingRate === 1 ? 'it' : 'them'}. <Link to="/settings">Fetch rates in Settings</Link>.
           </span>
         </Banner>
       ) : null}
 
-      {owedLines.length > 0 ? (
+      {overdueLines.length > 0 ? (
         <section className="drill-section">
           <h3 className="drill-h">
-            Due and not yet paid
-            <span className="drill-h-figure">{formatMoney(owed, currency)}</span>
+            Overdue
+            <span className="drill-h-figure">{formatMoney(overdue, currency)}</span>
           </h3>
           <p className="drill-sub">
-            Bills already in the ledger for {year}. Once one is marked paid on its tool's page it moves to
-            paid, and the total stays the same.
+            Past their due date and not marked paid. If one was paid, mark it paid on the tool's page and it
+            moves to paid; the total stays the same.
           </p>
-          <ForecastLineTable lines={owedLines} currency={currency} />
+          <ForecastLineTable lines={overdueLines} currency={currency} />
         </section>
       ) : null}
 
-      {billLines.length > 0 ? (
+      {comingLines.length > 0 ? (
         <section className="drill-section">
           <h3 className="drill-h">
             Bills still to come
-            <span className="drill-h-figure">{formatMoney(bills, currency)}</span>
+            <span className="drill-h-figure">{formatMoney(coming, currency)}</span>
           </h3>
           <p className="drill-sub">
-            Each subscription's next bills before 31 December, on its billing dates, at the price in effect
-            on each date. A yearly tool counts once, in the month it renews.
+            Every subscription bill from today to 31 December, on its billing date at the price in effect
+            then. Scheduled ones are already in the payment history; the rest are added as their dates come
+            into view. A yearly tool counts once, in the month it renews.
           </p>
-          <ForecastLineTable lines={billLines} currency={currency} />
-        </section>
-      ) : null}
-
-      {usageLines.length > 0 ? (
-        <section className="drill-section">
-          <h3 className="drill-h">
-            Cloud usage still to be billed
-            <span className="drill-h-figure">{formatMoney(usage, currency)}</span>
-          </h3>
-          <p className="drill-sub">
-            Every month after the last bill entered, at the product's recent average. An estimate: it is
-            replaced by the real figure as each month's bill is entered.
-          </p>
-          {summary.products
-            .filter((entry) => usageLines.some((l) => l.product_id === entry.product.id))
-            .map((entry) => {
-              const months = usageLines.filter((l) => l.product_id === entry.product.id);
-              const counted = entry.usage_window.filter((m) => m.amount !== null);
-              return (
-                <div className="drill-product" key={entry.product.id}>
-                  <div className="drill-product-head">
-                    <Link to={`/products/${entry.product.id}`} className="cell-primary">
-                      {entry.product.name}
-                    </Link>
-                    <span className="drill-h-figure">
-                      {formatMoney(months.reduce((s, l) => s + (l.amount_reported ?? 0), 0), currency)}
-                    </span>
-                  </div>
-                  <p className="drill-usage-sum">
-                    {months.map((l) => shortMonth(l.month, false)).join(', ')} ×{' '}
-                    <strong>{formatMoney(entry.usage_monthly_reported, currency)}</strong> a month — the average
-                    of {counted.map((m) => `${shortMonth(m.month, false)} ${formatMoney(m.amount, currency)}`).join(', ')}.{' '}
-                    <button
-                      type="button"
-                      className="link-button"
-                      onClick={() => onSwap({ kind: 'runrate', focus: 'products' })}
-                    >
-                      How the average is made
-                    </button>
-                  </p>
-                </div>
-              );
-            })}
+          <ForecastLineTable lines={comingLines} currency={currency} />
         </section>
       ) : null}
 
       {lines.length === 0 ? (
-        <EmptyState title="Nothing more to come this year" compact>
-          No unpaid bills, no renewals before 31 December, and no cloud usage left to estimate.
+        <EmptyState title="No bills left this year" compact>
+          Nothing overdue, and no subscription bills between today and 31 December.
         </EmptyState>
       ) : null}
 
@@ -829,9 +801,9 @@ function YearForecastSheet({
           </span>
         </h3>
         <p className="drill-sub">
-          Twelve months of every subscription at its current price, plus cloud at its average. It answers
-          "what does what we run cost per year", which is useful for comparing tools — not what {year} will
-          cost.{' '}
+          Twelve months of every subscription at its current price, plus cloud at its recent average. It
+          answers "what does what we run cost per year", which is useful for comparing tools — not what{' '}
+          {year} will cost.{' '}
           <button type="button" className="link-button" onClick={() => onSwap({ kind: 'runrate', focus })}>
             See it line by line
           </button>
@@ -856,7 +828,7 @@ function ForecastLineTable({ lines, currency }: { lines: YearForecastLine[]; cur
         <tbody>
           {lines.map((line) => (
             <tr key={`${line.kind}-${line.id}`}>
-              <td className="drill-when">{line.date ? formatDate(line.date) : shortMonth(line.month)}</td>
+              <td className="drill-when">{formatDate(line.date)}</td>
               <td>
                 <div className="cell-primary">
                   {line.tool_id ? (

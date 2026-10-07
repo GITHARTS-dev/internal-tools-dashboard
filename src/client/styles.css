@@ -524,6 +524,7 @@ a:not(.nav-link):not(.btn):hover { text-decoration-color: currentColor; }
 .lead-button .lead-unit svg, .split-key-chevron { vertical-align: -2px; color: var(--text-muted); }
 .forecast-figure { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; align-self: flex-start; }
 .forecast-note { margin-top: 6px; font-size: 13.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.forecast-note-sub { display: block; margin-top: 2px; font-size: 12px; color: var(--text-muted); }
 
 /* The year in one bar: hue says whose money, strength says paid or still to come. */
 .year-bar span { flex: 0 1 0; min-width: 3px; }
@@ -819,9 +820,9 @@ input[type='checkbox'] { min-width: auto; accent-color: var(--accent-mk); width:
 .drill-value { font-family: var(--disp); font-size: 34px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; color: var(--text-primary); }
 .drill-note { font-family: var(--mono); font-size: 11.5px; color: var(--text-muted); letter-spacing: 0.04em; }
 
-/* The parts a forecast is made of, four across, two on a phone. */
-.drill-parts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-@media (max-width: 640px) { .drill-parts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* The parts the committed total is made of, three across, stacked on a phone. */
+.drill-parts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 640px) { .drill-parts { grid-template-columns: 1fr; } }
 .drill-part {
   appearance: none; font: inherit; color: inherit; text-align: left;
   display: flex; flex-direction: column; gap: 3px; padding: 10px 12px;
@@ -832,6 +833,11 @@ button.drill-part:hover { background: var(--wash-hover); border-color: var(--rul
 .drill-part-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
 .drill-part strong { font-family: var(--disp); font-size: 16px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .drill-part-more { font-size: 12px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 3px; }
+.drill-note-box {
+  padding: 10px 12px; border-radius: var(--radius); background: var(--wash-neutral);
+  font-size: 13px; color: var(--text-secondary); line-height: 1.5;
+}
+.drill-note-box strong { color: var(--text-primary); font-weight: 600; }
 .drill-compare { padding-top: 14px; border-top: 1px dashed var(--rule-strong); }
 
 .drill-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }

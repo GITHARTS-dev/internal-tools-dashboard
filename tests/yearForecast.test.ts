@@ -82,7 +82,7 @@ describe('year forecast', () => {
   it('bills a monthly tool on each remaining date this year', () => {
     const result = forecast({ tools: [tool()] });
     expect(result.lines.map((l) => l.date)).toEqual(['2026-10-15', '2026-11-15', '2026-12-15']);
-    expect(result.renewals).toBe(3_000_00);
+    expect(result.to_come).toBe(3_000_00);
   });
 
   it('counts an annual renewal once, in full, and one already past not at all', () => {
@@ -94,7 +94,7 @@ describe('year forecast', () => {
     });
     expect(result.lines).toHaveLength(1);
     expect(result.lines[0]!.label).toBe('Renews in Nov');
-    expect(result.renewals).toBe(12_000_00);
+    expect(result.to_come).toBe(12_000_00);
   });
 
   it('never counts a month the ledger already holds a bill for', () => {
@@ -103,11 +103,13 @@ describe('year forecast', () => {
       payments: [payment({ id: 'oct', due_date: '2026-10-15', status: 'due', paid_on: null })],
     });
     expect(result.lines.filter((l) => l.kind === 'renewal').map((l) => l.date)).toEqual(['2026-11-15', '2026-12-15']);
-    expect(result.lines.filter((l) => l.kind === 'due')).toHaveLength(1);
-    expect(result.owed).toBe(1_000_00);
+    expect(result.lines.filter((l) => l.kind === 'scheduled')).toHaveLength(1);
+    // October's bill, already scheduled, is still to come -- not overdue.
+    expect(result.overdue).toBe(0);
+    expect(result.to_come).toBe(3_000_00);
   });
 
-  it('splits unpaid bills into overdue and due', () => {
+  it('splits unpaid bills into overdue and scheduled', () => {
     const result = forecast({
       tools: [tool({ renewal_date: null })],
       payments: [
@@ -118,7 +120,7 @@ describe('year forecast', () => {
       ],
     });
     const kinds = Object.fromEntries(result.lines.map((l) => [l.id, l.kind]));
-    expect(kinds).toEqual({ late: 'overdue', soon: 'due' });
+    expect(kinds).toEqual({ late: 'overdue', soon: 'scheduled' });
   });
 
   it('prices each bill at the price in effect on its date', () => {
@@ -149,7 +151,7 @@ describe('year forecast', () => {
     expect(forecast({ tools: [tool({ status: 'cancelled' })] }).lines).toHaveLength(0);
   });
 
-  it('estimates cloud usage for each month after the last bill entered, at the average', () => {
+  it('counts cloud bills entered as paid, and never predicts the months not yet billed', () => {
     const result = forecast({
       products: [product()],
       monthlyCosts: [
@@ -157,34 +159,25 @@ describe('year forecast', () => {
         cost({ id: 'sep', month: '2026-09', amount: 40_000_00 }),
       ],
     });
-    const usage = result.lines.filter((l) => l.kind === 'usage');
-    expect(usage.map((l) => l.month)).toEqual(['2026-10', '2026-11', '2026-12']);
-    expect(result.usage).toBe(3 * 28_000_00);
-    // Paid so far is the two bills; the year is those plus three more months.
     expect(result.paid).toBe(56_000_00);
-    expect(result.total).toBe(56_000_00 + 84_000_00);
+    expect(result.lines).toHaveLength(0);
+    expect(result.total).toBe(56_000_00);
   });
 
-  it('counts a past month whose bill is not entered yet as still to come', () => {
-    const result = forecast({
-      products: [product()],
-      monthlyCosts: [cost({ id: 'aug', month: '2026-08', amount: 30_000_00 })],
-    });
-    expect(result.lines.filter((l) => l.kind === 'usage').map((l) => l.month)).toEqual([
-      '2026-09', '2026-10', '2026-11', '2026-12',
-    ]);
-  });
-
-  it('adds it all up: paid, owed, renewals and usage', () => {
+  it('adds it all up: paid, overdue and still to come', () => {
     const result = forecast({
       tools: [tool()],
-      payments: [payment({ id: 'sep-paid' })],
+      payments: [
+        payment({ id: 'sep-paid' }),
+        payment({ id: 'aug-late', due_date: '2026-08-15', status: 'due', paid_on: null }),
+      ],
       products: [product()],
       monthlyCosts: [cost({ id: 'sep', month: '2026-09', amount: 20_000_00 })],
     });
     expect(result.paid).toBe(1_000_00 + 20_000_00);
-    expect(result.total).toBe(result.paid + result.owed + result.renewals + result.usage);
-    expect(result.total).toBe(21_000_00 + 3_000_00 + 3 * 20_000_00);
+    expect(result.overdue).toBe(1_000_00);
+    expect(result.to_come).toBe(3_000_00);
+    expect(result.total).toBe(result.paid + result.overdue + result.to_come);
   });
 
   it('converts a foreign bill at the latest rate held', () => {

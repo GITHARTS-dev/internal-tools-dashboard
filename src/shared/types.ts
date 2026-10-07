@@ -464,26 +464,25 @@ export interface CeoSummary {
   paid_items: SpendItem[];
   /** Every subscription in the run rate, one line each, for the forecast drill-down. */
   run_rate_items: RunRateItem[];
-  /** This calendar year: paid so far, plus what is still to come before 31 December. */
+  /** This calendar year: paid so far, plus the subscription bills still to come before 31 December. */
   year_forecast: YearForecast;
 }
 
-/** One amount still to come this year. */
+/** One subscription bill this year not yet paid. */
 export interface YearForecastLine {
   id: string;
   /**
-   * overdue / due: in the ledger, not yet paid. renewal: a bill the ledger does
-   * not hold yet, on the tool's billing date. usage: a month of cloud cost at
-   * the product's recent average -- an estimate.
+   * overdue: in the ledger, past its due date. scheduled: in the ledger, due
+   * later this year. renewal: a bill the ledger does not hold yet, on the
+   * tool's billing date at the price in effect then.
    */
-  kind: 'overdue' | 'due' | 'renewal' | 'usage';
-  /** The due date; null for a month of cloud usage. */
-  date: IsoDate | null;
+  kind: 'overdue' | 'scheduled' | 'renewal';
+  date: IsoDate;
   month: string;
   label: string;
   detail: string | null;
   tool_id: string | null;
-  /** The product it runs, for a tool attributed to one and for cloud usage. */
+  /** The product it runs, for a tool attributed to one. */
   product_id: string | null;
   amount: number;
   currency: string;
@@ -491,18 +490,20 @@ export interface YearForecastLine {
   amount_reported: number | null;
 }
 
+/**
+ * What the year is committed to. Cloud usage still to be billed is not in it:
+ * it moves with use, so it joins `paid` as each month's bill is entered.
+ */
 export interface YearForecast {
   year: string;
-  /** Paid this year so far, converted. */
+  /** Paid this year so far, cloud bills included, converted. */
   paid: number;
-  /** In the ledger, due this year, not yet paid. */
-  owed: number;
-  /** Bills still to come that the ledger does not hold yet. */
-  renewals: number;
-  /** Cloud usage for the months not yet entered, at each product's average. */
-  usage: number;
+  /** In the ledger, past due, not yet paid. */
+  overdue: number;
+  /** Subscription bills due from today to 31 December. */
+  to_come: number;
   total: number;
-  /** Everything after `paid`, in date order. */
+  /** Every unpaid bill, in date order. */
   lines: YearForecastLine[];
   /** Live tools with no renewal date: no way to place their bills in the year. */
   undated_tools: Array<{ tool_id: string; label: string }>;

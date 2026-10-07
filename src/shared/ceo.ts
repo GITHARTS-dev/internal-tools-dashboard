@@ -84,7 +84,11 @@ export interface CeoSummaryInput {
 }
 
 export function computeCeoSummary(input: CeoSummaryInput): CeoSummary {
-  const { tools, payments, products, tables, today } = input;
+  const { tools, products, tables, today } = input;
+  // A payment for a tool that is not here -- one in the Trash -- counts for
+  // nothing: not as paid, not as owed. Restoring the tool brings it back.
+  const toolIds = new Set(tools.map((t) => t.id));
+  const payments = input.payments.filter((p) => toolIds.has(p.tool_id));
   const monthlyCosts = input.monthlyCosts ?? [];
   const target = input.reportingCurrency.toUpperCase();
 
@@ -538,7 +542,7 @@ export function computeCeoSummary(input: CeoSummaryInput): CeoSummary {
       tools,
       payments,
       priceChanges: input.priceChanges ?? [],
-      products: productCosts,
+      products,
       paidItems,
       tables,
       target,

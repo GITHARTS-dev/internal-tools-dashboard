@@ -7,9 +7,13 @@ import {
   StackedColumns,
   type CumulativeInput,
 } from './Charts';
-import { Badge, Banner, EmptyState, MoneyTotals } from './ui';
+import { Badge, Banner, EmptyState } from './ui';
+import { IconChevronRight } from './icons';
+import type { DrillView } from './drilldown';
 import { formatDate } from '../../shared/dates';
-import { formatMoney } from '../../shared/money';
+import { breakdown, itemsBetween, splitYear } from '../../shared/drilldown';
+import { monthOf } from '../../shared/fx';
+import { formatMoney, formatShort } from '../../shared/money';
 import type { CeoSummary } from '../../shared/types';
 
 /**
@@ -72,143 +76,183 @@ export function Delta({ pct }: { pct: number | null }) {
 // -------------------------------------------------------------------- lead
 
 /**
- * The one number the spend half exists to deliver.
+ * The headline: what has actually been spent this year, beside where the year
+ * is expected to land by 31 December.
  *
- * A larger, brighter glass panel than the rest, and it carries its own trend
- * line so the number arrives with a direction rather than alone. Two columns on a wide screen so it costs about 150px of height rather than
+ * Money already paid leads, because it is a fact; the expected total sits
+ * beside it, split into paid and still to come so it never reads as spent.
+ * (A twelve-month run rate used to stand here, and read as money already gone;
+ * it is now one click into the forecast, for comparing tools.) Every figure
+ * opens a drill-down into the payments, bills and prices it is made of.
+ *
+ * Two columns on a wide screen so it costs about 150px of height rather than
  * 300 -- it shares the top of the page with the alerts, and must not push them
  * below the fold.
- *
- * `native` is the per-currency breakdown from before conversion. It is shown
- * only when there is more than one currency, since a lone one would just repeat
- * the headline.
  */
 export function SpendLead({
   summary,
-  native,
+  onDrill,
 }: {
   summary: CeoSummary;
-  native?: Record<string, number>;
+  onDrill: (view: DrillView) => void;
 }) {
   const currency = summary.reporting_currency;
-  const bought = summary.subscriptions.annual_reported ?? 0;
-  const internal = summary.internal.annual_reported ?? 0;
-  const combined = bought + internal;
-  const boughtPct = combined > 0 ? (bought / combined) * 100 : 0;
-  const hasNative = native !== undefined && Object.keys(native).length > 1;
-  // Once cloud usage is in the figure it is no longer purely a commitment, and
-  // calling it one would overstate how fixed it is.
-  const hasUsage = summary.internal.usage_annual_reported !== null;
+  const year = summary.today.slice(0, 4);
+  const thisYear = breakdown(itemsBetween(summary.paid_items, `${year}-01`, monthOf(summary.today)), currency);
+  const currencies = thisYear.by_currency.map((line) => line.currency);
+
+  const forecast = summary.year_forecast;
+  const toCome = forecast.total - forecast.paid;
+  const split = splitYear(summary.paid_items, forecast);
   const last12 = summary.paid_by_month.slice(-12);
 
   return (
     <section className="lead" aria-labelledby="lead-heading">
       <div className="lead-main">
         <h2 id="lead-heading" className="lead-label">
-          {hasUsage ? 'Annual spend' : 'Committed spend'}
+          Spent in {year} so far
         </h2>
 
-        <div className="lead-figure">
-          <span className="lead-value">
-            <Money amount={summary.total_annual_reported} currency={currency} />
+        <button
+          type="button"
+          className="lead-figure lead-button"
+          onClick={() => onDrill({ kind: 'year', year })}
+          aria-label={`Spent in ${year} so far: ${formatMoney(thisYear.total, currency)}. Open every payment and bill.`}
+        >
+          <span className="lead-value">{formatMoney(thisYear.total, currency)}</span>
+          <span className="lead-unit">
+            since 1 Jan <IconChevronRight size={13} />
           </span>
-          <span className="lead-unit">a year</span>
-        </div>
+        </button>
 
-        {/*
-          The run rate and the payment trend are different measures, so they get
-          different lines. Putting the delta beside the headline would say the
-          headline itself moved, which is not what was measured.
-        */}
         <div className="lead-meta">
           <span className="lead-rate">
-            {hasUsage
-              ? 'Every active subscription at its current price, plus cloud usage at its recent average, in this month\u2019s exchange rates'
-              : 'Every active subscription for a year at its current price, in this month\u2019s exchange rates'}{' '}
-            · <Money amount={summary.total_monthly_reported} currency={currency} /> a month
+            {formatMoney(thisYear.subscriptions, currency)} on subscriptions
+            {thisYear.usage > 0 ? ` + ${formatMoney(thisYear.usage, currency)} on our products' cloud usage` : ''}
+            {currencies.length > 1 ? `, paid in ${joinWords(currencies)} and shown in ${currency}` : ''}.{' '}
+            <button type="button" className="link-button" onClick={() => onDrill({ kind: 'year', year })}>
+              See every payment
+            </button>
           </span>
         </div>
 
         {summary.comparison.trailing_12 !== null ? (
           <p className="lead-actual">
-            We actually paid{' '}
-            <strong>
+            Last 12 complete months:{' '}
+            <button type="button" className="link-button strong" onClick={() => onDrill({ kind: 'last12' })}>
               <Money amount={summary.comparison.trailing_12} currency={currency} />
-            </strong>{' '}
-            over the last 12 complete months.
+            </button>
             {/* The change against the 12 months before (<Delta pct={summary.comparison.change_pct} />) is
                 switched off for now, along with the year-on-year card. */}
-          </p>
-        ) : null}
-
-        {hasNative ? (
-          <p className="lead-native">
-            Before conversion: <MoneyTotals totals={native} />
           </p>
         ) : null}
 
         {/* The headline arrives with a direction: the last 12 complete months. */}
         {last12.length >= 2 && last12.some((row) => row.amount > 0) ? (
           <div className="lead-trend">
-            <span className="lbl">Paid each month, last 12 months</span>
+            <span className="lbl">Paid each month · click a month for its payments</span>
             <Sparkline
               values={last12.map((row) => row.amount)}
               labels={last12.map((row) => monthLabel(row.month, true))}
               currency={currency}
+              onSelect={(i) => onDrill({ kind: 'month', month: last12[i]!.month })}
             />
           </div>
         ) : null}
       </div>
 
       <div className="lead-side">
+        <div className="lead-label">Expected for {year} · to 31 Dec</div>
+        <button
+          type="button"
+          className="forecast-figure lead-button"
+          onClick={() => onDrill({ kind: 'forecast', focus: 'all' })}
+          aria-label={`Expected for ${year}: ${formatMoney(forecast.total, currency)}. Open what is still to come.`}
+        >
+          <span className="forecast-value">{formatMoney(forecast.total, currency)}</span>
+          <IconChevronRight size={14} className="split-key-chevron" />
+        </button>
+        <p className="forecast-note">
+          {formatMoney(forecast.paid, currency)} paid + {formatMoney(toCome, currency)} still to come
+        </p>
+
         {/*
-          A part-to-whole bar needs two parts. With nothing attributed to an
-          internal product it would render as a full-width block, which reads as
-          a progress bar at 100% rather than as a split.
+          One bar for the year: blue for subscriptions we buy, orange for our own
+          products; solid for paid, pale for still to come. A segment under 0.5%
+          is not drawn -- it would be a sliver nobody could see or hover.
         */}
-        {bought > 0 && internal > 0 ? (
-          <div
-            className="proportion"
-            role="img"
-            aria-label={`Bought subscriptions ${Math.round(boughtPct)} percent of annual spend, our own products ${Math.round(100 - boughtPct)} percent`}
-          >
-            <span className="bought" style={{ width: `${boughtPct}%` }} />
-            <span className="internal" style={{ width: `${100 - boughtPct}%` }} />
-          </div>
+        {forecast.total > 0 ? (
+          <>
+            <div
+              className="proportion year-bar"
+              role="img"
+              aria-label={`Of ${formatMoney(forecast.total, currency)} expected: subscriptions we buy ${formatMoney(split.bought.paid, currency)} paid and ${formatMoney(split.bought.to_come, currency)} to come; our own products ${formatMoney(split.own.paid, currency)} paid and ${formatMoney(split.own.to_come, currency)} to come.`}
+            >
+              {[
+                { key: 'bp', value: split.bought.paid, className: 'bought' },
+                { key: 'bt', value: split.bought.to_come, className: 'bought is-to-come' },
+                { key: 'op', value: split.own.paid, className: 'internal' },
+                { key: 'ot', value: split.own.to_come, className: 'internal is-to-come' },
+              ]
+                .filter((seg) => seg.value / forecast.total >= 0.005)
+                .map((seg) => (
+                  <span key={seg.key} className={seg.className} style={{ flexGrow: seg.value }} />
+                ))}
+            </div>
+            <div className="year-bar-key" aria-hidden="true">
+              <span><i className="solid" /> paid</span>
+              <span><i className="pale" /> still to come</span>
+            </div>
+          </>
         ) : null}
 
-        <dl className="split-key">
-          <div className="split-key-item">
-            <dt>
+        <div className="split-key">
+          <button
+            type="button"
+            className="split-key-item"
+            onClick={() => onDrill({ kind: 'forecast', focus: 'subscriptions' })}
+          >
+            <span className="split-key-name">
               <span className="key-swatch" style={{ background: 'var(--series-1)' }} />
               Subscriptions we buy
-            </dt>
-            <dd>
-              <Money amount={summary.subscriptions.annual_reported} currency={currency} />
+            </span>
+            <span className="split-key-figure">
+              {formatMoney(split.bought.total, currency)}
               <span className="split-key-sub">
-                {summary.subscriptions.tool_count}{' '}
-                {summary.subscriptions.tool_count === 1 ? 'tool' : 'tools'}
+                {formatShort(split.bought.paid, currency)} paid ·{' '}
+                {formatShort(split.bought.to_come, currency)} to come
               </span>
-            </dd>
-          </div>
-          <div className="split-key-item">
-            <dt>
+            </span>
+            <IconChevronRight size={14} className="split-key-chevron" />
+          </button>
+          <button
+            type="button"
+            className="split-key-item"
+            onClick={() => onDrill({ kind: 'forecast', focus: 'products' })}
+          >
+            <span className="split-key-name">
               <span className="key-swatch" style={{ background: 'var(--series-2)' }} />
               Running our own products
-            </dt>
-            <dd>
-              <Money amount={summary.internal.annual_reported} currency={currency} />
+            </span>
+            <span className="split-key-figure">
+              {formatMoney(split.own.total, currency)}
               <span className="split-key-sub">
-                {summary.internal.product_count}{' '}
-                {summary.internal.product_count === 1 ? 'product' : 'products'} ·{' '}
-                {hasUsage ? 'subscriptions and usage' : 'licences only'}
+                {formatShort(split.own.paid, currency)} paid ·{' '}
+                {formatShort(split.own.to_come, currency)} to come
               </span>
-            </dd>
-          </div>
-        </dl>
+            </span>
+            <IconChevronRight size={14} className="split-key-chevron" />
+          </button>
+        </div>
       </div>
     </section>
   );
+}
+
+/** 'INR', 'INR and USD', 'INR, USD and EUR'. */
+function joinWords(words: string[]): string {
+  if (words.length <= 1) return words.join('');
+  return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
 }
 
 // ------------------------------------------------------------------- trend
@@ -222,7 +266,7 @@ export function SpendLead({
  * still being paid, and a part-month beside full ones reads as a drop that has
  * not happened.
  */
-export function TrendCard({ summary }: { summary: CeoSummary }) {
+export function TrendCard({ summary, onDrill }: { summary: CeoSummary; onDrill: (view: DrillView) => void }) {
   const currency = summary.reporting_currency;
   const window = summary.paid_by_month.slice(-12);
   const hasUsage = window.some((row) => row.usage > 0);
@@ -245,9 +289,14 @@ export function TrendCard({ summary }: { summary: CeoSummary }) {
     <section className="card">
       <div className="card-head">
         <h2>What we paid, month by month</h2>
-        <span className="hint">complete months, from the ledger</span>
+        <span className="hint">complete months · click one for its payments</span>
       </div>
-      <StackedColumns points={points} series={series} currency={currency} />
+      <StackedColumns
+        points={points}
+        series={series}
+        currency={currency}
+        onSelect={(i) => onDrill({ kind: 'month', month: window[i]!.month })}
+      />
     </section>
   );
 }
@@ -315,7 +364,7 @@ export function YearCompareCard({ summary }: { summary: CeoSummary }) {
 
 // ------------------------------------------------------------ concentration
 
-export function BiggestToolsCard({ summary }: { summary: CeoSummary }) {
+export function BiggestToolsCard({ summary, onDrill }: { summary: CeoSummary; onDrill: (view: DrillView) => void }) {
   const currency = summary.reporting_currency;
   // The whole the shares are shares of: every costed subscription, not just the
   // eight shown, so the percentages say how concentrated the spend really is.
@@ -325,7 +374,12 @@ export function BiggestToolsCard({ summary }: { summary: CeoSummary }) {
     <section className="card">
       <div className="card-head">
         <h2>Our biggest subscriptions</h2>
-        <span className="hint">a year each</span>
+        <span className="hint">
+          a year each ·{' '}
+          <button type="button" className="link-button" onClick={() => onDrill({ kind: 'runrate', focus: 'subscriptions' })}>
+            see all
+          </button>
+        </span>
       </div>
       {summary.top_tools.length === 0 ? (
         <EmptyState title="No costed tools yet" compact />
@@ -387,15 +441,19 @@ export function CategoryCard({
 
 // ---------------------------------------------------------------- products
 
-export function ProductsCard({ summary }: { summary: CeoSummary }) {
+export function ProductsCard({ summary, onDrill }: { summary: CeoSummary; onDrill: (view: DrillView) => void }) {
   const currency = summary.reporting_currency;
+  const year = summary.year_forecast.year;
+  // The same split the headline uses, so a product here and "Running our own
+  // products" there are the same money.
+  const byProduct = splitYear(summary.paid_items, summary.year_forecast).by_product;
 
   return (
     <section className="card">
       <div className="card-head">
         <h2>Our products</h2>
         <span className="hint">
-          <Link to="/products">Manage products</Link>
+          {year}, paid and to come · <Link to="/products">Manage</Link>
         </span>
       </div>
 
@@ -409,66 +467,92 @@ export function ProductsCard({ summary }: { summary: CeoSummary }) {
           {summary.products.map((entry) => {
             const hasUsage = entry.usage_monthly_reported !== null;
             const fixedKnown = (entry.fixed_annual_reported ?? 0) > 0;
+            const part = byProduct.get(entry.product.id) ?? { paid: 0, to_come: 0, total: 0 };
             // Nothing recorded on either side. Showing 0.00 here would say the
             // product is free, when the truth is that nobody has entered its cost.
-            const unknown = !hasUsage && !fixedKnown;
+            const unknown = !hasUsage && !fixedKnown && part.total === 0;
+            const paidPct = part.total > 0 ? (part.paid / part.total) * 100 : 0;
             return (
-              <div className="product-row" key={entry.product.id}>
-                <div style={{ minWidth: 0 }}>
-                  <div className="product-name">
-                    <Link to={`/products/${entry.product.id}`}>{entry.product.name}</Link>
-                  </div>
-                  <div className="product-meta">
-                    {hasUsage ? (
-                      <>
-                        {/* A zero subscription part is noise, not information. */}
-                        {fixedKnown ? (
-                          <>
-                            <Money amount={entry.fixed_annual_reported} currency={currency} />{' '}
-                            subscriptions{' + '}
-                          </>
-                        ) : null}
-                        <Money amount={entry.usage_annual_reported} currency={currency} /> usage
-                        {entry.usage_months_counted > 0
-                          ? ` (${entry.usage_months_counted}-month average)`
-                          : ''}
-                      </>
-                    ) : (
-                      <>
-                        {entry.tool_count} {entry.tool_count === 1 ? 'subscription' : 'subscriptions'}
-                        {' · '}no usage costs entered
-                      </>
-                    )}
-                    {entry.product.owner_name ? ` · ${entry.product.owner_name}` : ''}
-                    {entry.product.status !== 'live' ? ` · ${entry.product.status}` : ''}
-                  </div>
-                  {entry.cost_entry_due ? (
-                    <div style={{ marginTop: 6 }}>
-                      <Link to={`/products/${entry.product.id}`}>
-                        <Badge tone="warning">
-                          {monthLabel(summary.latest_complete_month, true)} costs not entered
-                        </Badge>
-                      </Link>
+              <div className="product-block" key={entry.product.id}>
+                <div className="product-block-head">
+                  <div style={{ minWidth: 0 }}>
+                    <div className="product-name">
+                      <Link to={`/products/${entry.product.id}`}>{entry.product.name}</Link>
                     </div>
-                  ) : null}
-                </div>
-                <div className="product-cost">
+                    <div className="product-meta">
+                      {entry.product.owner_name ?? 'No owner set'}
+                      {entry.product.status !== 'live' ? ` · ${entry.product.status}` : ''}
+                    </div>
+                  </div>
                   {unknown ? (
-                    <>
+                    <div className="product-cost">
                       <div className="primary" style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
                         Not known yet
                       </div>
                       <div className="secondary">no cost recorded</div>
-                    </>
+                    </div>
                   ) : (
-                    <>
-                      <div className="primary">
-                        <Money amount={entry.annual_reported} currency={currency} />
+                    <button
+                      type="button"
+                      className="product-cost product-cost-button"
+                      onClick={() => onDrill({ kind: 'forecast', focus: 'products' })}
+                      aria-label={`${entry.product.name}: ${formatMoney(part.total, currency)} expected in ${year}. See what is paid and what is still to come.`}
+                    >
+                      <div className="primary">{formatMoney(part.total, currency)}</div>
+                      <div className="secondary">
+                        expected in {year} <IconChevronRight size={11} />
                       </div>
-                      <div className="secondary">a year</div>
-                    </>
+                    </button>
                   )}
                 </div>
+
+                {unknown ? null : (
+                  <>
+                    <div
+                      className="proportion year-bar"
+                      role="img"
+                      aria-label={`${formatMoney(part.paid, currency)} paid, ${formatMoney(part.to_come, currency)} still to come`}
+                    >
+                      {part.paid > 0 ? <span className="internal" style={{ flexGrow: paidPct }} /> : null}
+                      {part.to_come > 0 ? (
+                        <span className="internal is-to-come" style={{ flexGrow: 100 - paidPct }} />
+                      ) : null}
+                    </div>
+                    <dl className="product-stats">
+                      <div>
+                        <dt>Paid</dt>
+                        <dd>{formatShort(part.paid, currency)}</dd>
+                      </div>
+                      <div>
+                        <dt>To come</dt>
+                        <dd>{formatShort(part.to_come, currency)}</dd>
+                      </div>
+                      <div>
+                        <dt>Today's pace</dt>
+                        <dd>
+                          {formatShort(entry.annual_reported, currency)}
+                          <span> /yr</span>
+                        </dd>
+                      </div>
+                    </dl>
+                    <div className="product-meta">
+                      {hasUsage
+                        ? `Cloud is a ${entry.usage_months_counted}-month average of the bills entered.`
+                        : 'No cloud bills entered yet.'}
+                      {entry.tool_count > 0
+                        ? ` Runs on ${entry.tool_count} ${entry.tool_count === 1 ? 'subscription' : 'subscriptions'}.`
+                        : ''}
+                    </div>
+                  </>
+                )}
+
+                {entry.cost_entry_due ? (
+                  <div>
+                    <Link to={`/products/${entry.product.id}`}>
+                      <Badge tone="warning">{monthLabel(summary.latest_complete_month, true)} costs not entered</Badge>
+                    </Link>
+                  </div>
+                ) : null}
               </div>
             );
           })}
@@ -573,7 +657,7 @@ export function CoverageNotice({ summary }: { summary: CeoSummary }) {
  * -- but it is a short paragraph of small type, not a section. The one table
  * that backs a chart is a click away rather than in the way.
  */
-export function MethodFooter({ summary }: { summary: CeoSummary }) {
+export function MethodFooter({ summary, onDrill }: { summary: CeoSummary; onDrill: (view: DrillView) => void }) {
   const currency = summary.reporting_currency;
   const first = summary.rate_months[0];
   const lastRate = summary.rate_months[summary.rate_months.length - 1];
@@ -602,7 +686,11 @@ export function MethodFooter({ summary }: { summary: CeoSummary }) {
             <tbody>
               {summary.paid_by_year.map((row) => (
                 <tr key={row.year}>
-                  <td className="cell-primary">{row.year}</td>
+                  <td className="cell-primary">
+                    <button type="button" className="link-button" onClick={() => onDrill({ kind: 'year', year: row.year })}>
+                      {row.year}
+                    </button>
+                  </td>
                   <td className="num">{formatMoney(row.amount, currency)}</td>
                 </tr>
               ))}

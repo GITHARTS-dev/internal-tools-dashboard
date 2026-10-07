@@ -14,6 +14,7 @@ import {
   SpendLead,
   TrendCard,
 } from '../components/spend';
+import { Drilldown, useDrill } from '../components/drilldown';
 
 /**
  * One page, two jobs, in the order they should be done.
@@ -23,6 +24,9 @@ import {
  * who opens this daily lands on what needs doing; the CEO who opens it weekly
  * gets the number first and the analysis under it. The change log lives in
  * Settings -- it is an audit trail, not something to read on arrival.
+ *
+ * Every money figure opens a drill-down (components/drilldown.tsx) into the
+ * payments, bills and prices it is made of. Which one is open lives in the URL.
  *
  * The two halves load independently. The alerts are the part that must never
  * be unavailable, so a failure fetching the cost figures leaves them in place
@@ -36,12 +40,13 @@ export default function Dashboard() {
   const [showAllAlerts, setShowAllAlerts] = useState(false);
   const { data, error, loading } = useAsync(() => api.dashboard(), []);
   const spend = useAsync(() => api.ceoSummary(), []);
+  const drill = useDrill();
 
   if (loading && !data) return <Loading rows={4} />;
   if (error) return <Banner tone="critical">{error}</Banner>;
   if (!data) return null;
 
-  const { kpis, alerts, category_spend, renewal_timeline } = data;
+  const { alerts, category_spend, renewal_timeline } = data;
   const urgent = alerts.filter((a) => a.severity === 'critical');
   const visibleAlerts = showAllAlerts ? alerts : alerts.slice(0, ALERTS_SHOWN);
 
@@ -78,7 +83,7 @@ export default function Dashboard() {
 
       {summary ? (
         <>
-          <SpendLead summary={summary} native={kpis.annualised_spend} />
+          <SpendLead summary={summary} onDrill={drill.open} />
           <CoverageNotice summary={summary} />
         </>
       ) : spend.error ? (
@@ -145,23 +150,35 @@ export default function Dashboard() {
       </div>
 
       {/*
-        Built only from payments marked paid, so left out until there is one
-        rather than drawn as an empty frame. Full width on its own: the
-        year-on-year card that used to sit beside it is switched off for now
-        (YearCompareCard in components/spend.tsx -- put it back in a
-        grid-main row with this one to restore it).
-      */}
-      {summary && summary.paid_by_month.some((row) => row.amount > 0) ? <TrendCard summary={summary} /> : null}
+        Two rows of two, each pair the same shape so the cards share a top and
+        a bottom edge: the monthly chart beside our products (the orange in the
+        chart is their cloud usage), then the two ranked lists side by side.
+        Three across left each ranked list a third of the width, which cut tool
+        names short, and stranded a near-empty products card beside them.
 
+        The trend is built only from payments marked paid, so it is left out
+        until there is one rather than drawn as an empty frame. The
+        year-on-year card (YearCompareCard in components/spend.tsx) is switched
+        off for now.
+      */}
       {summary ? (
-        <div className="grid grid-3">
-          <BiggestToolsCard summary={summary} />
-          <CategoryCard summary={summary} uncosted={uncosted} />
-          <ProductsCard summary={summary} />
+        <div className="grid grid-main">
+          {summary.paid_by_month.some((row) => row.amount > 0) ? (
+            <TrendCard summary={summary} onDrill={drill.open} />
+          ) : null}
+          <ProductsCard summary={summary} onDrill={drill.open} />
         </div>
       ) : null}
 
-      {summary ? <MethodFooter summary={summary} /> : null}
+      {summary ? (
+        <div className="grid grid-2">
+          <BiggestToolsCard summary={summary} onDrill={drill.open} />
+          <CategoryCard summary={summary} uncosted={uncosted} />
+        </div>
+      ) : null}
+
+      {summary ? <MethodFooter summary={summary} onDrill={drill.open} /> : null}
+      {summary ? <Drilldown summary={summary} /> : null}
     </>
   );
 }

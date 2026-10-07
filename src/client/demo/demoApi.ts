@@ -843,6 +843,7 @@ export const demoApi = {
         payments,
         products: internalProducts,
         monthlyCosts: productCosts,
+        priceChanges,
         tables: demoRateTables(),
         reportingCurrency: settings().reporting_currency,
         today: DEMO_TODAY,

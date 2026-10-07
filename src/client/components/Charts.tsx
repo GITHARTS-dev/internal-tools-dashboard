@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { currencySymbol, decimalPlaces, formatMoney } from '../../shared/money';
+import { currencySymbol, decimalPlaces, formatMoney, formatShort } from '../../shared/money';
 import { formatDate } from '../../shared/dates';
 
 /**
@@ -112,14 +112,19 @@ function barPath(x: number, y: number, w: number, h: number, r: number, grow: 'r
 /** Axis ticks are landmarks, not values: no decimal places, always compact. */
 function axisTick(value: number, currency: string): string {
   if (value === 0) return '0';
-  return formatMoney(Math.round(value), currency, { compact: true }).replace(/\.00$/, '');
+  return formatShort(Math.round(value), currency);
 }
 
+/**
+ * The axis maximum: the smallest round number at or above the data. Finer steps
+ * than 1-2-5 so the tallest mark reaches most of the way up -- a ceiling of 2L
+ * over a 1.3L peak left a third of every chart empty.
+ */
 function niceCeiling(value: number): number {
   if (value <= 0) return 1;
   const magnitude = 10 ** Math.floor(Math.log10(value));
   const normalised = value / magnitude;
-  const step = normalised <= 1 ? 1 : normalised <= 2 ? 2 : normalised <= 5 ? 5 : 10;
+  const step = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].find((candidate) => normalised <= candidate) ?? 10;
   return step * magnitude;
 }
 
@@ -178,16 +183,18 @@ export function BarRows({
 
   if (rows.length === 0) return <Empty>No spend to show yet.</Empty>;
 
-  const rowHeight = 32;
-  const barHeight = 12;
-  // The label column shrinks on narrow screens rather than squeezing the bars
-  // down to nothing.
-  const labelWidth = Math.max(78, Math.min(150, width * 0.34));
-  const valueWidth = total ? Math.max(112, Math.min(140, width * 0.3)) : Math.max(60, Math.min(96, width * 0.22));
-  const height = rows.length * rowHeight;
-  const max = maxOverride ?? niceCeiling(Math.max(...rows.map((r) => r.value)));
-  const charBudget = Math.max(8, Math.floor(labelWidth / 7));
+  // Each row is a line of text -- name left, amount and share right -- with its
+  // bar underneath at the full width. A name column beside the bars had to cut
+  // names short in a third-width card; this way the name gets the whole line.
+  const rowHeight = 38;
+  const barHeight = 8;
+  const textY = 12;
+  const barY = 22;
+  const height = rows.length * rowHeight - (rowHeight - barY - barHeight);
+  const max = maxOverride ?? Math.max(...rows.map((r) => r.value), 1);
   const formatValue = columnFormatter(rows.map((r) => r.value), currency);
+  const valueRoom = total ? 112 : 76;
+  const charBudget = Math.max(10, Math.floor((width - valueRoom) / 7));
 
   return (
     <div ref={ref}>
@@ -204,8 +211,7 @@ export function BarRows({
         >
           {rows.map((row, i) => {
             const y = i * rowHeight;
-            const trackWidth = width - labelWidth - valueWidth;
-            const barW = max > 0 ? (row.value / max) * trackWidth : 0;
+            const barW = max > 0 ? (row.value / max) * width : 0;
             const share = total && total > 0 ? Math.round((row.value / total) * 100) : null;
             return (
               <g
@@ -225,41 +231,27 @@ export function BarRows({
               >
                 {/* Hit target spans the full row, not just the bar. */}
                 <rect x={0} y={y} width={width} height={rowHeight} className="mark-hit" />
-                {/* The track shows how much of the maximum this is, and how much is left. */}
-                <rect
-                  x={labelWidth}
-                  y={y + (rowHeight - barHeight) / 2}
-                  width={trackWidth}
-                  height={barHeight}
-                  rx={3}
-                  className="bar-track"
-                />
-                <text
-                  className="series-label"
-                  x={labelWidth - 10}
-                  y={y + rowHeight / 2}
-                  textAnchor="end"
-                  dominantBaseline="central"
-                >
+                <text className="row-label" x={0} y={y + textY} dominantBaseline="central">
                   {clip(row.label, charBudget)}
                 </text>
-                <path
-                  className="mark"
-                  d={barPath(labelWidth, y + (rowHeight - barHeight) / 2, Math.max(barW, 3), barHeight, 3, 'right')}
-                />
-                <text
-                  className="value-label"
-                  x={labelWidth + trackWidth + 10}
-                  y={y + rowHeight / 2}
-                  dominantBaseline="central"
-                >
+                <text className="value-label" x={width} y={y + textY} textAnchor="end" dominantBaseline="central">
                   {formatValue(row.value)}
                   {share !== null ? (
-                    <tspan className="share-label" dx={7}>
-                      {share}%
+                    <tspan className="share-label" dx={8}>
+                      {String(share).padStart(2, '\u2007')}%
                     </tspan>
                   ) : null}
                 </text>
+                {/* The track shows how much of the largest this is. */}
+                <rect x={0} y={y + barY} width={width} height={barHeight} rx={barHeight / 2} className="bar-track" />
+                <rect
+                  className="mark"
+                  x={0}
+                  y={y + barY}
+                  width={Math.max(barW, barHeight)}
+                  height={barHeight}
+                  rx={barHeight / 2}
+                />
               </g>
             );
           })}
@@ -298,10 +290,13 @@ export function StackedColumns({
   points,
   series,
   currency,
+  onSelect,
 }: {
   points: StackPoint[];
   series: StackSeries[];
   currency: string;
+  /** When given, each column is a button that opens its month. */
+  onSelect?: (index: number) => void;
 }) {
   const { show, hide, node } = useTooltip();
   const [ref, width] = useMeasuredWidth();
@@ -309,11 +304,14 @@ export function StackedColumns({
 
   if (points.length === 0) return <Empty>No payments recorded yet.</Empty>;
 
-  const height = 232;
-  const padLeft = 8;
-  const padRight = 84;
-  const padTop = 16;
-  const padBottom = 26;
+  // A gutter on the left for the axis, so its labels never sit on a column. The
+  // series are named in the legend under the chart rather than again at the
+  // right edge, which cost the plot 84px for words the legend already says.
+  const height = 216;
+  const padLeft = 46;
+  const padRight = 4;
+  const padTop = 10;
+  const padBottom = 24;
   const plotHeight = height - padTop - padBottom;
   const plotWidth = Math.max(0, width - padLeft - padRight);
   const totals = points.map((p) => p.values.reduce((sum, v) => sum + v, 0));
@@ -323,7 +321,6 @@ export function StackedColumns({
   const ticks = [0, max / 2, max];
   const yFor = (v: number) => padTop + plotHeight - (v / max) * plotHeight;
 
-  const last = points[points.length - 1]!;
 
   return (
     <div ref={ref}>
@@ -333,7 +330,9 @@ export function StackedColumns({
           height={height}
           width={width}
           viewBox={`0 0 ${width} ${height}`}
-          role="img"
+          // A group rather than an image once the columns are buttons: an
+          // image's children are hidden from assistive technology.
+          role={onSelect ? 'group' : 'img'}
           aria-label={`Amount paid per month, by kind. ${points
             .map(
               (p) =>
@@ -346,7 +345,7 @@ export function StackedColumns({
             return (
               <g key={tick}>
                 <line className="gridline" x1={padLeft} x2={padLeft + plotWidth} y1={y} y2={y} />
-                <text className="axis-label" x={padLeft} y={y - 5}>
+                <text className="axis-label" x={padLeft - 8} y={y} textAnchor="end" dominantBaseline="central">
                   {axisTick(tick, currency)}
                 </text>
               </g>
@@ -363,7 +362,27 @@ export function StackedColumns({
               <g
                 key={point.fullLabel}
                 opacity={dimmed ? 0.45 : 1}
-                style={{ transition: 'opacity 0.12s' }}
+                style={{ transition: 'opacity 0.12s', cursor: onSelect ? 'pointer' : undefined }}
+                className={onSelect ? 'chart-target' : undefined}
+                {...(onSelect
+                  ? {
+                      role: 'button',
+                      tabIndex: 0,
+                      'aria-label': `${point.fullLabel}: ${formatMoney(totals[i] ?? 0, currency)} paid. Open the detail.`,
+                      onClick: () => {
+                        hide();
+                        onSelect(i);
+                      },
+                      onKeyDown: (e: React.KeyboardEvent) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onSelect(i);
+                        }
+                      },
+                      onFocus: () => setHover(i),
+                      onBlur: () => setHover(null),
+                    }
+                  : {})}
                 onMouseMove={(e) => {
                   setHover(i);
                   show(e, (
@@ -376,6 +395,7 @@ export function StackedColumns({
                         </div>
                       ))}
                       <div className="tip-row tip-total">Total {formatMoney(totals[i] ?? 0, currency)}</div>
+                      {onSelect ? <div className="tip-hint">Click for every payment</div> : null}
                     </>
                   ));
                 }}
@@ -407,8 +427,8 @@ export function StackedColumns({
           <line className="baseline" x1={padLeft} x2={padLeft + plotWidth} y1={padTop + plotHeight} y2={padTop + plotHeight} />
 
           {points.map((point, i) => {
-            // Labelling every month crowds the axis; roughly every other one is plenty.
-            const every = points.length > 8 ? 2 : 1;
+            // Every month while there is room for it; every other one when narrow.
+            const every = slot >= 34 ? 1 : 2;
             if (i % every !== 0 && i !== points.length - 1) return null;
             return (
               <text
@@ -423,27 +443,6 @@ export function StackedColumns({
             );
           })}
 
-          {/* Direct labels at the last column, where there is room to the right. */}
-          {(() => {
-            let acc = 0;
-            return series.map((s, si) => {
-              const value = last.values[si] ?? 0;
-              const mid = acc + value / 2;
-              acc += value;
-              if (value <= 0 || (value / max) * plotHeight < 13) return null;
-              return (
-                <text
-                  key={`end-${s.key}`}
-                  className="end-label"
-                  x={padLeft + plotWidth + 8}
-                  y={yFor(mid)}
-                  dominantBaseline="central"
-                >
-                  {s.name}
-                </text>
-              );
-            });
-          })()}
         </svg>
       ) : null}
       <div className="legend">
@@ -669,11 +668,14 @@ export function Sparkline({
   labels,
   currency,
   height = 52,
+  onSelect,
 }: {
   values: number[];
   labels: string[];
   currency: string;
   height?: number;
+  /** When given, each point opens its month: by click, or by Tab and Enter. */
+  onSelect?: (index: number) => void;
 }) {
   const { show, hide, node } = useTooltip();
   const [ref, width] = useMeasuredWidth();
@@ -690,26 +692,40 @@ export function Sparkline({
   const line = values.map((v, i) => `${i === 0 ? 'M' : 'L'}${xFor(i)},${yFor(v)}`).join(' ');
   const area = `${line} L${xFor(values.length - 1)},${height - pad} L${xFor(0)},${height - pad} Z`;
   const shown = hover ?? values.length - 1;
+  const slice = Math.max(width - pad * 2, 1) / Math.max(values.length - 1, 1);
+
+  const nearest = (event: React.MouseEvent<SVGSVGElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = (event.clientX - rect.left - pad) / Math.max(width - pad * 2, 1);
+    return Math.max(0, Math.min(values.length - 1, Math.round(ratio * (values.length - 1))));
+  };
 
   return (
     <div ref={ref} className="sparkline">
       {width > 0 ? (
         <svg
-          className="chart"
+          className={onSelect ? 'chart is-clickable' : 'chart'}
           width={width}
           height={height}
           viewBox={`0 0 ${width} ${height}`}
-          role="img"
+          role={onSelect ? 'group' : 'img'}
           aria-label={`Paid per month: ${labels.map((l, i) => `${l} ${formatMoney(values[i] ?? 0, currency)}`).join(', ')}`}
+          onClick={
+            onSelect
+              ? (event) => {
+                  hide();
+                  onSelect(nearest(event));
+                }
+              : undefined
+          }
           onMouseMove={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect();
-            const ratio = (event.clientX - rect.left - pad) / Math.max(width - pad * 2, 1);
-            const i = Math.max(0, Math.min(values.length - 1, Math.round(ratio * (values.length - 1))));
+            const i = nearest(event);
             setHover(i);
             show(event, (
               <>
                 <div className="tip-title">{labels[i]}</div>
                 <div className="tip-row">{formatMoney(values[i] ?? 0, currency)} paid</div>
+                {onSelect ? <div className="tip-hint">Click for every payment</div> : null}
               </>
             ));
           }}
@@ -726,7 +742,38 @@ export function Sparkline({
           </defs>
           <path d={area} fill="url(#spark-fill)" />
           <path d={line} fill="none" stroke="var(--series-1)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+          {/* With a click target, every point is marked, so it reads as something to press. */}
+          {onSelect
+            ? values.map((v, i) => (
+                <circle key={`pt-${i}`} cx={xFor(i)} cy={yFor(v)} r={2.5} fill="var(--series-1)" opacity={0.55} />
+              ))
+            : null}
           <circle cx={xFor(shown)} cy={yFor(values[shown] ?? 0)} r={4} fill="var(--series-1)" stroke="var(--chart-gap)" strokeWidth={2} />
+          {/* Keyboard targets: one transparent slice per point. */}
+          {onSelect
+            ? values.map((v, i) => (
+                <rect
+                  key={`key-${i}`}
+                  className="chart-key-target"
+                  x={Math.max(0, xFor(i) - slice / 2)}
+                  y={0}
+                  width={slice}
+                  height={height}
+                  fill="transparent"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${labels[i]}: ${formatMoney(v, currency)} paid. Open the detail.`}
+                  onFocus={() => setHover(i)}
+                  onBlur={() => setHover(null)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onSelect(i);
+                    }
+                  }}
+                />
+              ))
+            : null}
         </svg>
       ) : null}
       {node}
@@ -767,16 +814,21 @@ export function RenewalTimeline({ items, horizon = 90 }: { items: TimelineItem[]
 
   if (items.length === 0) return <Empty>Nothing renews in the next {horizon} days.</Empty>;
 
-  const rowHeight = 25;
-  const padTop = 28;
-  const padBottom = 8;
-  const padX = 12;
+  // Names in a column of their own on the left, time to the right. A name drawn
+  // beside its dot ran into other rows' lines and dots wherever renewals
+  // bunched up, which is exactly when the chart matters.
+  const rowHeight = 26;
+  const padTop = 24;
+  const padBottom = 6;
+  const labelWidth = Math.max(96, Math.min(168, width * 0.34));
+  const padX = labelWidth + 10;
+  const padRight = 14;
   const height = padTop + items.length * rowHeight + padBottom;
-  const trackWidth = width - padX * 2;
+  const trackWidth = Math.max(1, width - padX - padRight);
   const xFor = (days: number) => padX + Math.max(0, Math.min(1, days / horizon)) * trackWidth;
 
   const gridDays = [0, 30, 60, 90].filter((d) => d <= horizon);
-  const charBudget = Math.max(10, Math.floor(width / 26));
+  const charBudget = Math.max(10, Math.floor((labelWidth - 6) / 6.6));
   const hasWindow = items.some((i) => i.noticeDaysUntil !== null && i.noticeDaysUntil !== undefined);
 
   return (
@@ -803,7 +855,7 @@ export function RenewalTimeline({ items, horizon = 90 }: { items: TimelineItem[]
           {gridDays.map((day) => (
             <g key={day}>
               <line className="gridline" x1={xFor(day)} x2={xFor(day)} y1={padTop - 8} y2={height - padBottom} />
-              <text className="axis-label" x={xFor(day)} y={padTop - 14} textAnchor={day === 0 ? 'start' : 'middle'}>
+              <text className="axis-label" x={xFor(day)} y={padTop - 12} textAnchor={day === 0 ? 'start' : day === horizon ? 'end' : 'middle'}>
                 {day === 0 ? 'today' : `+${day}d`}
               </text>
             </g>
@@ -812,7 +864,6 @@ export function RenewalTimeline({ items, horizon = 90 }: { items: TimelineItem[]
           {items.map((item, i) => {
             const y = padTop + i * rowHeight + rowHeight / 2;
             const x = xFor(item.daysUntil);
-            const labelLeft = x > padX + trackWidth * 0.62;
 
             const notice = item.noticeDaysUntil;
             const hasNotice = notice !== null && notice !== undefined;
@@ -869,13 +920,7 @@ export function RenewalTimeline({ items, horizon = 90 }: { items: TimelineItem[]
                 ) : null}
 
                 <circle cx={x} cy={y} r={5} className="mark" stroke="var(--chart-gap)" strokeWidth={2} />
-                <text
-                  className="series-label"
-                  x={labelLeft ? x - 12 : x + 12}
-                  y={y}
-                  textAnchor={labelLeft ? 'end' : 'start'}
-                  dominantBaseline="central"
-                >
+                <text className="row-label" x={0} y={y} dominantBaseline="central">
                   {clip(item.name, charBudget)}
                 </text>
               </g>

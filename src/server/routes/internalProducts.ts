@@ -32,6 +32,7 @@ import { rateTablesByMonth } from '../repo/fxRates';
 import { getSettings } from '../repo/settings';
 import { listAllTools } from '../repo/tools';
 import { listPayments } from '../repo/payments';
+import { listPriceChanges } from '../repo/priceChanges';
 import { todayInTimezone } from '../../shared/dates';
 
 export const internalProductRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -231,12 +232,13 @@ internalProductRoutes.delete('/internal-products/:id/costs/:costId', async (c) =
  */
 internalProductRoutes.get('/ceo-summary', async (c) => {
   const settings = await getSettings(db(c));
-  const [tools, payments, products, tables, monthlyCosts] = await Promise.all([
+  const [tools, payments, products, tables, monthlyCosts, priceChanges] = await Promise.all([
     listAllTools(db(c)),
     listPayments(db(c)),
     listInternalProducts(db(c)),
     rateTablesByMonth(db(c)),
     listAllProductCosts(db(c)),
+    listPriceChanges(db(c)),
   ]);
 
   return c.json(
@@ -245,6 +247,7 @@ internalProductRoutes.get('/ceo-summary', async (c) => {
       payments,
       products,
       monthlyCosts,
+      priceChanges,
       tables,
       reportingCurrency: settings.reporting_currency,
       today: todayInTimezone(settings.timezone),

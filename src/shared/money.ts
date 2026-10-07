@@ -83,6 +83,23 @@ export function formatMoney(
 }
 
 /**
+ * A short figure for small print and axes: '₹54K', '₹4.6L', '$1.2K', '₹950'.
+ * Always compact from a thousand up, so figures set side by side share one
+ * format -- `formatMoney`'s compact mode only starts at a lakh, which put
+ * '₹4.6L' beside '₹54,179.21'.
+ */
+export function formatShort(amount: Minor | null | undefined, currency = 'INR'): string {
+  if (amount === null || amount === undefined) return '--';
+  const value = amount / 10 ** decimalPlaces(currency);
+  const locale = currency.toUpperCase() === 'INR' ? 'en-IN' : 'en-US';
+  const format =
+    Math.abs(value) >= 1_000
+      ? new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 })
+      : new Intl.NumberFormat(locale, { maximumFractionDigits: 0 });
+  return `${currencySymbol(currency)}${format.format(value)}`;
+}
+
+/**
  * The annual cost of a recurring subscription, in minor units.
  * Returns null for one_time and custom cycles: they have no annual run-rate,
  * and quietly treating a one-off purchase as recurring spend would overstate

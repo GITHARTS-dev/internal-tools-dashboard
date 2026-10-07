@@ -341,6 +341,11 @@ export interface InternalProductCost {
   usage_annual_reported: number | null;
   /** How many of the last three complete months the average is over. */
   usage_months_counted: number;
+  /**
+   * The months the usage average was taken over, oldest first, converted. The
+   * forecast drill-down shows these so the average can be checked by hand.
+   */
+  usage_window: Array<{ month: string; entered: boolean; amount: number | null }>;
   /** The most recent month with any entry, complete or not. */
   last_cost_month: string | null;
   /**
@@ -452,6 +457,101 @@ export interface CeoSummary {
   /** Months whose ECB rates the totals used. */
   rate_months: string[];
   fx_available: boolean;
+  /**
+   * Everything that was actually paid, one line each, so any total of paid
+   * spend can be opened up into the payments and bills it is made of.
+   */
+  paid_items: SpendItem[];
+  /** Every subscription in the run rate, one line each, for the forecast drill-down. */
+  run_rate_items: RunRateItem[];
+  /** This calendar year: paid so far, plus what is still to come before 31 December. */
+  year_forecast: YearForecast;
+}
+
+/** One amount still to come this year. */
+export interface YearForecastLine {
+  id: string;
+  /**
+   * overdue / due: in the ledger, not yet paid. renewal: a bill the ledger does
+   * not hold yet, on the tool's billing date. usage: a month of cloud cost at
+   * the product's recent average -- an estimate.
+   */
+  kind: 'overdue' | 'due' | 'renewal' | 'usage';
+  /** The due date; null for a month of cloud usage. */
+  date: IsoDate | null;
+  month: string;
+  label: string;
+  detail: string | null;
+  tool_id: string | null;
+  /** The product it runs, for a tool attributed to one and for cloud usage. */
+  product_id: string | null;
+  amount: number;
+  currency: string;
+  /** Converted at the latest rate held; null when no rate covered it. */
+  amount_reported: number | null;
+}
+
+export interface YearForecast {
+  year: string;
+  /** Paid this year so far, converted. */
+  paid: number;
+  /** In the ledger, due this year, not yet paid. */
+  owed: number;
+  /** Bills still to come that the ledger does not hold yet. */
+  renewals: number;
+  /** Cloud usage for the months not yet entered, at each product's average. */
+  usage: number;
+  total: number;
+  /** Everything after `paid`, in date order. */
+  lines: YearForecastLine[];
+  /** Live tools with no renewal date: no way to place their bills in the year. */
+  undated_tools: Array<{ tool_id: string; label: string }>;
+  /** Amounts no exchange rate covered, left out of every figure above. */
+  unconverted: number;
+}
+
+/**
+ * One amount that was actually spent: a payment marked paid, or one month's
+ * recorded cloud bill for one of our products.
+ */
+export interface SpendItem {
+  id: string;
+  kind: 'subscription' | 'usage';
+  /** 'YYYY-MM' the money belongs to: the month paid, or the month billed. */
+  month: string;
+  /** The day it was paid. Null for a cloud bill, which belongs to a month, not a day. */
+  date: IsoDate | null;
+  /** The tool's name, or the product's. */
+  label: string;
+  /** The vendor, or the cloud provider. */
+  detail: string | null;
+  tool_id: string | null;
+  /** Set for a cloud bill, and for a payment on a tool attributed to a product. */
+  product_id: string | null;
+  /** As recorded, in minor units of `currency`. */
+  amount: number;
+  currency: string;
+  /** In the reporting currency at its own month's rate; null when no rate covered it. */
+  amount_reported: number | null;
+  /** Whose rates converted it; null when it was already in the reporting currency. */
+  rate_month: string | null;
+}
+
+/** One subscription in the run rate, as priced today. */
+export interface RunRateItem {
+  tool_id: string;
+  label: string;
+  vendor: string | null;
+  /** Null for a bought subscription; the product's id when attributed to one. */
+  product_id: string | null;
+  cost_amount: number;
+  billing_cycle: BillingCycle;
+  currency: string;
+  /** A year of it, before conversion. */
+  annual: number;
+  /** A year of it in the reporting currency at the latest rate; null when no rate covered it. */
+  annual_reported: number | null;
+  monthly_reported: number | null;
 }
 
 /** How much is stored, and how much of it is the built-in demo data. */

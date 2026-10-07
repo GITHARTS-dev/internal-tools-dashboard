@@ -23,7 +23,7 @@ This app looks like the rest of HARTS. Its visual language is taken from the com
 
 ## Layout of the dashboard
 
-Headline figure — what was actually paid this year so far — with its own sparkline, beside what the calendar year is expected to cost by 31 December (paid + due + bills still to come on their real dates + cloud at its average), split bought / own and paid / to come in one bar; coverage notice if any; Needs attention beside Renewals and idle seats (by tool); spend by month beside our products; biggest subscriptions beside categories; method footer. Cards sit in pairs of the same shape so they share top and bottom edges. The twelve-month run rate is no longer a headline -- it read as money already spent -- and lives one click into the forecast, for comparing tools.
+Headline figure — what was actually paid this year so far — with its own sparkline, beside what the calendar year is committed to by 31 December (paid + overdue + subscription bills still to come on their real dates), split bought / own and paid / to come in one bar. Cloud usage still to be billed is never predicted -- it moves with use -- and joins the total as each month's bill is entered; coverage notice if any; Needs attention beside Renewals and idle seats (by tool); spend by month beside our products; biggest subscriptions beside categories; method footer. Cards sit in pairs of the same shape so they share top and bottom edges. The twelve-month run rate is no longer a headline -- it read as money already spent -- and lives one click into the forecast, for comparing tools.
 
 ## Prohibitions
 
@@ -37,4 +37,6 @@ A selected set of steps for a dark ground, not an inversion: glass becomes a fai
 
 Text steps were chosen to clear 4.5:1 on white and on the tinted glass; this has not been measured in a browser with a tool. Focus ring 2.5px brand orange. Every status has an icon or word. Navigation scrolls horizontally on phones rather than wrapping into a wall. `prefers-reduced-motion` stops the aurora and the load-in.
 
-**Drill-downs.** Every money figure opens a side panel (`components/drilldown.tsx`) showing what it is made of: for paid money, every payment and cloud bill as paid and in the reporting currency, with a by-currency table; for the year forecast, paid so far plus each unpaid bill, each bill still to come and each month of estimated cloud usage; for the run rate, every subscription at its price and each product's usage average with the months behind it. Its lines add up to the figure it was opened from, and that is tested. The open panel lives in the URL (`?view=month:2026-09`), so Back closes it.
+**Drill-downs.** Every money figure opens a side panel (`components/drilldown.tsx`) showing what it is made of: for paid money, every payment and cloud bill as paid and in the reporting currency, with a by-currency table; for the committed year, paid so far plus each overdue bill and each subscription bill still to come; for the run rate, every subscription at its price and each product's usage average with the months behind it. Its lines add up to the figure it was opened from, and that is tested. The open panel lives in the URL (`?view=month:2026-09`), so Back closes it.
+
+A tool in the Trash counts for nothing anywhere -- not its payments, paid or owed. Restoring it brings them back.

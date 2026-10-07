@@ -1,46 +1,41 @@
 /**
- * Where this calendar year will land: what has been paid, plus what is still
- * to come before 31 December.
+ * What this calendar year is committed to: what has been paid, plus the
+ * subscription bills still to come before 31 December.
  *
- * Four parts, kept apart because they are known to different degrees:
+ * Three parts, every one a known amount on a known date:
  *
- *   paid       payments marked paid and cloud bills entered this year. Fact.
- *   owed       payments in the ledger, due this year and not yet paid --
- *              overdue or coming up. Known amounts on known dates.
- *   renewals   each live subscription's remaining bills this year that the
- *              ledger does not hold yet, on its real billing dates at the
- *              price in effect on each date -- the same rule the scheduler
- *              uses to add them. A tool renewing yearly in November counts
- *              once, in full; one that renewed in February counts nothing more.
- *   usage      each product's cloud cost for the months not yet entered, at its
- *              recent average. The only estimate, and labelled as one.
+ *   paid       payments marked paid and cloud bills entered this year.
+ *   overdue    payments in the ledger whose due date has passed, not yet paid.
+ *   to come    bills due between today and 31 December: the ones already in
+ *              the ledger, and each live subscription's further bills on its
+ *              real billing dates at the price in effect on each date -- the
+ *              same rule the scheduler uses to add them. A tool renewing yearly
+ *              in November counts once, in full; one that renewed in February
+ *              counts nothing more.
  *
- * Nothing is guessed: a live tool with no renewal date cannot be placed in the
- * year, so it is listed as undated rather than spread across the months.
+ * Cloud usage still to be billed is deliberately NOT here. It moves with use,
+ * month to month, and an average times the months left was a guess presented
+ * beside facts. It joins the total as each month's bill is entered.
+ *
+ * Nothing is guessed for subscriptions either: a live tool with no renewal date
+ * cannot be placed in the year, so it is listed as undated instead.
  */
 
-import { addMonthsToYearMonth, sumConverted, type RateTable, type YearMonth } from './fx';
+import { sumConverted, type RateTable, type YearMonth } from './fx';
 import { addMonths, cycleMonths, type IsoDate } from './dates';
 import { effectiveRenewalDate } from './alerts';
 import { priceOn } from './prices';
-import type {
-  InternalProductCost,
-  Payment,
-  PriceChange,
-  SpendItem,
-  Tool,
-  YearForecast,
-  YearForecastLine,
-} from './types';
+import type { InternalProduct, Payment, PriceChange, SpendItem, Tool, YearForecast, YearForecastLine } from './types';
 
 /** Tools in these states are still being paid for -- the scheduler's own rule. */
 const BILLED_STATUSES = new Set(['active', 'trial']);
 
 export interface YearForecastInput {
+  /** Tools that exist: a tool in the Trash, and its bills, count for nothing. */
   tools: Tool[];
   payments: Payment[];
   priceChanges: PriceChange[];
-  products: InternalProductCost[];
+  products: InternalProduct[];
   paidItems: SpendItem[];
   tables: Record<YearMonth, RateTable>;
   target: string;
@@ -56,9 +51,9 @@ export function computeYearForecast(input: YearForecastInput): YearForecast {
   const toolsById = new Map(tools.map((t) => [t.id, t]));
   // A tool pointing at a product that no longer exists is a bought
   // subscription, as everywhere else in the summary.
-  const productIds = new Set(products.map((p) => p.product.id));
-  const productOf = (tool: Tool | undefined): string | null =>
-    tool?.internal_product_id && productIds.has(tool.internal_product_id) ? tool.internal_product_id : null;
+  const productIds = new Set(products.map((p) => p.id));
+  const productOf = (tool: Tool): string | null =>
+    tool.internal_product_id && productIds.has(tool.internal_product_id) ? tool.internal_product_id : null;
 
   let unconverted = 0;
   const convert = (amount: number, currency: string, month: YearMonth): number | null => {
@@ -80,20 +75,21 @@ export function computeYearForecast(input: YearForecastInput): YearForecast {
 
   const lines: YearForecastLine[] = [];
 
-  // ------------------------------------------------------------------ owed
+  // --------------------------------------------- in the ledger, not paid
   for (const payment of payments) {
     if (payment.status !== 'due') continue;
     if (payment.due_date.slice(0, 4) !== year) continue;
     const tool = toolsById.get(payment.tool_id);
+    if (!tool) continue; // in the Trash: it will not be paid
     const month = payment.due_date.slice(0, 7);
     lines.push({
       id: payment.id,
-      kind: payment.due_date < today ? 'overdue' : 'due',
+      kind: payment.due_date < today ? 'overdue' : 'scheduled',
       date: payment.due_date,
       month,
-      label: tool?.name ?? 'A removed tool',
-      detail: tool?.vendor ?? null,
-      tool_id: tool ? tool.id : null,
+      label: tool.name,
+      detail: tool.vendor,
+      tool_id: tool.id,
       product_id: productOf(tool),
       amount: payment.amount,
       currency: payment.currency.toUpperCase(),
@@ -101,7 +97,7 @@ export function computeYearForecast(input: YearForecastInput): YearForecast {
     });
   }
 
-  // -------------------------------------------------------------- renewals
+  // ------------------------------------------- not in the ledger yet
   // A month the ledger already has a bill for -- paid, due or waived -- is
   // that bill, so it is never counted twice.
   const ledgerMonths = new Set(payments.map((p) => `${p.tool_id}::${p.due_date.slice(0, 7)}`));
@@ -123,11 +119,10 @@ export function computeYearForecast(input: YearForecastInput): YearForecast {
     // After the next bill, only an auto-renewing tool keeps billing -- the
     // scheduler's rule too. Counted from the first date each time, so a bill
     // on the 31st does not drift to the 28th and stay there.
-    for (let k = 0; ; k++) {
+    for (let k = 0; k <= 60; k++) {
       if (k > 0 && (step === null || !tool.auto_renew)) break;
       const due = k === 0 ? first : addMonths(first, k * step!);
       if (due > yearEnd) break;
-      if (k > 60) break; // a guard, never reached by a real cycle within one year
 
       if (tool.payments_scheduled_through && due <= tool.payments_scheduled_through) continue;
       const month = due.slice(0, 7);
@@ -151,61 +146,19 @@ export function computeYearForecast(input: YearForecastInput): YearForecast {
     }
   }
 
-  // ----------------------------------------------------------------- usage
-  // Every month from the one after the last bill entered to December, at the
-  // product's recent average. Not before the product existed, and not before
-  // this year began.
-  for (const entry of products) {
-    if (entry.product.status === 'retired') continue;
-    const average = entry.usage_monthly_reported;
-    if (average === null || !entry.last_cost_month) continue;
-
-    const started = [entry.product.launched_on, entry.product.created_at]
-      .filter((d): d is string => Boolean(d))
-      .map((d) => d.slice(0, 7))
-      .sort()[0];
-    let month = addMonthsToYearMonth(entry.last_cost_month, 1);
-    if (started && month < started) month = started;
-    if (month < firstMonth) month = firstMonth;
-
-    const counted = entry.usage_window.filter((m) => m.amount !== null).map((m) => m.month);
-    for (; month <= lastMonth; month = addMonthsToYearMonth(month, 1)) {
-      lines.push({
-        id: `${entry.product.id}::${month}`,
-        kind: 'usage',
-        date: null,
-        month,
-        label: entry.product.name,
-        detail: counted.length > 0 ? `average of ${counted.length} ${counted.length === 1 ? 'month' : 'months'}` : null,
-        tool_id: null,
-        product_id: entry.product.id,
-        amount: average,
-        currency: target,
-        amount_reported: average,
-      });
-    }
-  }
-
-  lines.sort(
-    (a, b) =>
-      a.month.localeCompare(b.month) ||
-      (a.date ?? '9999').localeCompare(b.date ?? '9999') ||
-      a.label.localeCompare(b.label),
-  );
+  lines.sort((a, b) => (a.date ?? '').localeCompare(b.date ?? '') || a.label.localeCompare(b.label));
 
   const sum = (kinds: YearForecastLine['kind'][]) =>
     lines.filter((l) => kinds.includes(l.kind)).reduce((s, l) => s + (l.amount_reported ?? 0), 0);
-  const owed = sum(['overdue', 'due']);
-  const renewals = sum(['renewal']);
-  const usage = sum(['usage']);
+  const overdue = sum(['overdue']);
+  const toCome = sum(['scheduled', 'renewal']);
 
   return {
     year,
     paid,
-    owed,
-    renewals,
-    usage,
-    total: paid + owed + renewals + usage,
+    overdue,
+    to_come: toCome,
+    total: paid + overdue + toCome,
     lines,
     undated_tools: undated,
     unconverted,

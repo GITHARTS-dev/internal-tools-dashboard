@@ -76,11 +76,13 @@ export function Delta({ pct }: { pct: number | null }) {
 // -------------------------------------------------------------------- lead
 
 /**
- * The headline: what has actually been spent this year, beside where the year
- * is expected to land by 31 December.
+ * The headline: what has actually been spent this year, beside what the year
+ * is committed to by 31 December.
  *
- * Money already paid leads, because it is a fact; the expected total sits
- * beside it, split into paid and still to come so it never reads as spent.
+ * Money already paid leads, because it is a fact; the committed total sits
+ * beside it -- paid, plus the subscription bills still to come on their real
+ * dates -- split so it never reads as spent. Cloud usage still to be billed is
+ * not guessed at: it joins the total as each month's bill is entered.
  * (A twelve-month run rate used to stand here, and read as money already gone;
  * it is now one click into the forecast, for comparing tools.) Every figure
  * opens a drill-down into the payments, bills and prices it is made of.
@@ -162,18 +164,19 @@ export function SpendLead({
       </div>
 
       <div className="lead-side">
-        <div className="lead-label">Expected for {year} · to 31 Dec</div>
+        <div className="lead-label">Committed for {year} · to 31 Dec</div>
         <button
           type="button"
           className="forecast-figure lead-button"
           onClick={() => onDrill({ kind: 'forecast', focus: 'all' })}
-          aria-label={`Expected for ${year}: ${formatMoney(forecast.total, currency)}. Open what is still to come.`}
+          aria-label={`Committed for ${year}: ${formatMoney(forecast.total, currency)}. Open the bills still to come.`}
         >
           <span className="forecast-value">{formatMoney(forecast.total, currency)}</span>
           <IconChevronRight size={14} className="split-key-chevron" />
         </button>
         <p className="forecast-note">
-          {formatMoney(forecast.paid, currency)} paid + {formatMoney(toCome, currency)} still to come
+          {formatMoney(forecast.paid, currency)} paid + {formatMoney(toCome, currency)} in bills not yet paid
+          <span className="forecast-note-sub">Cloud usage counts once billed; it is not predicted.</span>
         </p>
 
         {/*
@@ -186,7 +189,7 @@ export function SpendLead({
             <div
               className="proportion year-bar"
               role="img"
-              aria-label={`Of ${formatMoney(forecast.total, currency)} expected: subscriptions we buy ${formatMoney(split.bought.paid, currency)} paid and ${formatMoney(split.bought.to_come, currency)} to come; our own products ${formatMoney(split.own.paid, currency)} paid and ${formatMoney(split.own.to_come, currency)} to come.`}
+              aria-label={`Of ${formatMoney(forecast.total, currency)} committed: subscriptions we buy ${formatMoney(split.bought.paid, currency)} paid and ${formatMoney(split.bought.to_come, currency)} to come; our own products ${formatMoney(split.own.paid, currency)} paid and ${formatMoney(split.own.to_come, currency)} to come.`}
             >
               {[
                 { key: 'bp', value: split.bought.paid, className: 'bought' },
@@ -453,7 +456,7 @@ export function ProductsCard({ summary, onDrill }: { summary: CeoSummary; onDril
       <div className="card-head">
         <h2>Our products</h2>
         <span className="hint">
-          {year}, paid and to come · <Link to="/products">Manage</Link>
+          {year} so far · <Link to="/products">Manage</Link>
         </span>
       </div>
 
@@ -472,6 +475,11 @@ export function ProductsCard({ summary, onDrill }: { summary: CeoSummary; onDril
             // product is free, when the truth is that nobody has entered its cost.
             const unknown = !hasUsage && !fixedKnown && part.total === 0;
             const paidPct = part.total > 0 ? (part.paid / part.total) * 100 : 0;
+            // The most recent cloud bill entered: a fact, where a yearly
+            // projection of it would be a guess.
+            const bills = summary.paid_items.filter((i) => i.kind === 'usage' && i.product_id === entry.product.id);
+            const lastMonth = bills.reduce<string | null>((max, i) => (max === null || i.month > max ? i.month : max), null);
+            const lastBill = bills.filter((i) => i.month === lastMonth).reduce((sum, i) => sum + (i.amount_reported ?? 0), 0);
             return (
               <div className="product-block" key={entry.product.id}>
                 <div className="product-block-head">
@@ -496,11 +504,11 @@ export function ProductsCard({ summary, onDrill }: { summary: CeoSummary; onDril
                       type="button"
                       className="product-cost product-cost-button"
                       onClick={() => onDrill({ kind: 'forecast', focus: 'products' })}
-                      aria-label={`${entry.product.name}: ${formatMoney(part.total, currency)} expected in ${year}. See what is paid and what is still to come.`}
+                      aria-label={`${entry.product.name}: ${formatMoney(part.total, currency)} committed in ${year}. See what is paid and what is still to come.`}
                     >
                       <div className="primary">{formatMoney(part.total, currency)}</div>
                       <div className="secondary">
-                        expected in {year} <IconChevronRight size={11} />
+                        committed in {year} <IconChevronRight size={11} />
                       </div>
                     </button>
                   )}
@@ -524,20 +532,26 @@ export function ProductsCard({ summary, onDrill }: { summary: CeoSummary; onDril
                         <dd>{formatShort(part.paid, currency)}</dd>
                       </div>
                       <div>
-                        <dt>To come</dt>
+                        <dt>Bills to come</dt>
                         <dd>{formatShort(part.to_come, currency)}</dd>
                       </div>
                       <div>
-                        <dt>Today's pace</dt>
+                        <dt>Last cloud bill</dt>
                         <dd>
-                          {formatShort(entry.annual_reported, currency)}
-                          <span> /yr</span>
+                          {lastMonth ? (
+                            <>
+                              {formatShort(lastBill, currency)}
+                              <span> {monthLabel(lastMonth)}</span>
+                            </>
+                          ) : (
+                            <span>none yet</span>
+                          )}
                         </dd>
                       </div>
                     </dl>
                     <div className="product-meta">
-                      {hasUsage
-                        ? `Cloud is a ${entry.usage_months_counted}-month average of the bills entered.`
+                      {entry.last_cost_month
+                        ? `Cloud counts up to ${monthLabel(entry.last_cost_month, true)}, the last bill entered; later months join as they are billed.`
                         : 'No cloud bills entered yet.'}
                       {entry.tool_count > 0
                         ? ` Runs on ${entry.tool_count} ${entry.tool_count === 1 ? 'subscription' : 'subscriptions'}.`

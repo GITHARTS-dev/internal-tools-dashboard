@@ -4,11 +4,11 @@ import { api, ApiError } from '../lib/api';
 import { useAsync, useDebounced } from '../lib/hooks';
 import { Banner, EmptyState, Loading, StatusBadge, useToast } from '../components/ui';
 import { SeatMeter } from '../components/Charts';
-import { formatMoney, annualisedCost } from '../../shared/money';
+import { formatMoney, formatShort, annualisedCost } from '../../shared/money';
 import { formatDate, daysBetween, relativeDays } from '../../shared/dates';
 import type { Tool } from '../../shared/types';
 
-type SortKey = 'name' | 'owner' | 'cost' | 'renewal' | 'category';
+type SortKey = 'name' | 'owner' | 'cost' | 'renewal';
 
 const CYCLE_LABEL: Record<string, string> = {
   monthly: 'Monthly',
@@ -18,6 +18,14 @@ const CYCLE_LABEL: Record<string, string> = {
   custom: 'Custom',
 };
 
+/**
+ * Every tool, grouped by category in the table itself.
+ *
+ * A category dropdown hid all but one group at a time; grouping shows the
+ * whole estate at once, each category headed by its tool count and what it
+ * costs a year (per currency -- this page shows money as charged). Sorting
+ * applies within each group.
+ */
 export default function Tools() {
   const navigate = useNavigate();
   const toast = useToast();
@@ -31,7 +39,6 @@ export default function Tools() {
     }
   }
 
-  const [category, setCategory] = useState('');
   const [owner, setOwner] = useState('');
   const [includeArchived, setIncludeArchived] = useState(false);
   const [sort, setSort] = useState<SortKey>('renewal');
@@ -43,11 +50,10 @@ export default function Tools() {
     () =>
       api.tools({
         ...(debouncedSearch ? { search: debouncedSearch } : {}),
-        ...(category ? { category } : {}),
         ...(owner ? { owner } : {}),
         ...(includeArchived ? { include_archived: 'true' } : {}),
       }),
-    [debouncedSearch, category, owner, includeArchived],
+    [debouncedSearch, owner, includeArchived],
   );
 
   const options = useAsync(() => api.toolOptions(), []);
@@ -61,8 +67,6 @@ export default function Tools() {
       switch (sort) {
         case 'owner':
           return direction * (a.owner_name ?? '~').localeCompare(b.owner_name ?? '~');
-        case 'category':
-          return direction * a.category.localeCompare(b.category);
         case 'cost': {
           // Compare like with like: a monthly and an annual price are not
           // comparable until both are annualised.
@@ -82,6 +86,28 @@ export default function Tools() {
     });
     return tools;
   }, [data, sort, descending]);
+
+  // Categories A to Z, with the catch-all last.
+  const groups = useMemo(() => {
+    const byCategory = new Map<string, Tool[]>();
+    for (const tool of sorted) {
+      const key = tool.category || 'Other';
+      const list = byCategory.get(key);
+      if (list) list.push(tool);
+      else byCategory.set(key, [tool]);
+    }
+    return [...byCategory.entries()]
+      .sort(([a], [b]) => Number(a === 'Other') - Number(b === 'Other') || a.localeCompare(b))
+      .map(([name, tools]) => {
+        const annual: Record<string, number> = {};
+        for (const tool of tools) {
+          if (tool.status === 'cancelled' || tool.status === 'expired') continue;
+          const value = annualisedCost(tool.cost_amount, tool.billing_cycle);
+          if (value) annual[tool.currency] = (annual[tool.currency] ?? 0) + value;
+        }
+        return { name, tools, annual };
+      });
+  }, [sorted]);
 
   function toggleSort(key: SortKey) {
     if (sort === key) setDescending((d) => !d);
@@ -111,14 +137,6 @@ export default function Tools() {
           style={{ minWidth: 260 }}
           aria-label="Search tools"
         />
-        <select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Filter by category">
-          <option value="">All categories</option>
-          {(options.data?.categories ?? []).map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
         <select value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Filter by owner">
           <option value="">All owners</option>
           {(options.data?.owners ?? [])
@@ -154,15 +172,18 @@ export default function Tools() {
 
       <section className="card">
         <div className="card-head">
-          <h2>{sorted.length} tool{sorted.length === 1 ? '' : 's'}</h2>
-          <span className="hint">Costs shown per billing period</span>
+          <h2>
+            {sorted.length} tool{sorted.length === 1 ? '' : 's'}
+            {groups.length > 1 ? <span className="card-head-sub"> in {groups.length} categories</span> : null}
+          </h2>
+          <span className="hint">Cost per billing period</span>
         </div>
 
         {loading && !data ? (
           <Loading />
         ) : sorted.length === 0 ? (
           <EmptyState title="No tools match">
-            {search || category || owner
+            {search || owner
               ? 'Try clearing the filters above.'
               : 'Add your first tool, or import a CSV from Settings.'}
           </EmptyState>
@@ -173,7 +194,6 @@ export default function Tools() {
                 <tr>
                   {header('name', 'Tool')}
                   {header('owner', 'Owner')}
-                  {header('category', 'Category')}
                   <th scope="col">Billing</th>
                   {header('cost', 'Cost', true)}
                   <th scope="col" className="after-num">Seats</th>
@@ -181,8 +201,27 @@ export default function Tools() {
                   <th scope="col">Status</th>
                 </tr>
               </thead>
-              <tbody>
-                {sorted.map((tool: Tool) => {
+              {groups.map((group) => (
+              <tbody key={group.name} className="group">
+                <tr className="group-row">
+                  <th scope="rowgroup" colSpan={7}>
+                    <span className="group-name">{group.name}</span>
+                    <span className="group-meta">
+                      {group.tools.length} {group.tools.length === 1 ? 'tool' : 'tools'}
+                      {Object.keys(group.annual).length > 0 ? (
+                        <>
+                          {' · '}
+                          {Object.entries(group.annual)
+                            .sort((a, b) => b[1] - a[1])
+                            .map(([cur, amount]) => formatShort(amount, cur))
+                            .join(' + ')}{' '}
+                          a year
+                        </>
+                      ) : null}
+                    </span>
+                  </th>
+                </tr>
+                {group.tools.map((tool: Tool) => {
                   const days = tool.renewal_date ? daysBetween(today, tool.renewal_date) : null;
                   return (
                     <tr key={tool.id} onClick={() => navigate(`/tools/${tool.id}`)} style={{ cursor: 'pointer' }}>
@@ -193,7 +232,6 @@ export default function Tools() {
                       <td>
                         {tool.owner_name ?? <span className="cell-sub">Unassigned</span>}
                       </td>
-                      <td>{tool.category}</td>
                       <td>{CYCLE_LABEL[tool.billing_cycle] ?? tool.billing_cycle}</td>
                       <td className="num">
                         {tool.cost_amount === null ? (
@@ -224,6 +262,7 @@ export default function Tools() {
                   );
                 })}
               </tbody>
+              ))}
             </table>
           </div>
         )}

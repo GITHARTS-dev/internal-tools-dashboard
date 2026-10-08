@@ -1,14 +1,8 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import {
-  BarRows,
-  CumulativeCompare,
-  SeatMeter,
-  Sparkline,
-  StackedColumns,
-  type CumulativeInput,
-} from './Charts';
+import { BarRows, CumulativeCompare, SeatMeter, type CumulativeInput } from './Charts';
 import { Badge, Banner, EmptyState } from './ui';
-import { IconChevronRight } from './icons';
+import { IconChevronLeft, IconChevronRight } from './icons';
 import type { DrillView } from './drilldown';
 import { formatDate } from '../../shared/dates';
 import { breakdown, itemsBetween, splitYear, type YearPart } from '../../shared/drilldown';
@@ -96,7 +90,6 @@ export function SpendLead({
   const thisYear = breakdown(itemsBetween(summary.paid_items, `${year}-01`, monthOf(summary.today)), currency);
   const forecast = summary.year_forecast;
   const split = splitYear(summary.paid_items, forecast);
-  const last12 = summary.paid_by_month.slice(-12);
 
   const rows: Array<{ key: 'subscriptions' | 'products'; label: string; colour: string; part: YearPart }> = [
     { key: 'subscriptions', label: 'Subscriptions', colour: 'var(--series-1)', part: split.bought },
@@ -128,29 +121,7 @@ export function SpendLead({
             <dt>Cloud</dt>
             <dd>{formatShort(thisYear.usage, currency)}</dd>
           </div>
-          {summary.comparison.trailing_12 !== null ? (
-            <div>
-              <dt>Last 12 months</dt>
-              <dd>
-                <button type="button" className="link-button strong" onClick={() => onDrill({ kind: 'last12' })}>
-                  {formatShort(summary.comparison.trailing_12, currency)}
-                </button>
-              </dd>
-            </div>
-          ) : null}
         </dl>
-
-        {last12.length >= 2 && last12.some((row) => row.amount > 0) ? (
-          <div className="lead-trend">
-            <span className="lbl">Each month · click for detail</span>
-            <Sparkline
-              values={last12.map((row) => row.amount)}
-              labels={last12.map((row) => monthLabel(row.month, true))}
-              currency={currency}
-              onSelect={(i) => onDrill({ kind: 'month', month: last12[i]!.month })}
-            />
-          </div>
-        ) : null}
       </div>
 
       <div className="lead-side">
@@ -205,48 +176,134 @@ export function SpendLead({
   );
 }
 
-// ------------------------------------------------------------------- trend
+// ------------------------------------------------------------ month by month
 
 /**
- * Twelve complete months, stacked by kind of spend.
+ * Each month of a calendar year as a row: subscriptions, cloud, total, and a
+ * bar for its size.
  *
- * Twelve rather than the full 24 held in the data: at two years the columns
- * were too thin to read and the older half told a story the year-on-year chart
- * beside it already tells. The current month is left out on purpose -- it is
- * still being paid, and a part-month beside full ones reads as a drop that has
- * not happened.
+ * A table rather than a chart, because the question it answers is "how much,
+ * exactly, in which month" -- and the bar in each row still shows the shape at
+ * a glance, so a separate chart would only repeat it. Built from the same
+ * payments as "Spent in" and summed the same way, so the total row equals the
+ * headline to the paisa. The current month is shown as it stands, marked so.
  */
-export function TrendCard({ summary, onDrill }: { summary: CeoSummary; onDrill: (view: DrillView) => void }) {
+export function MonthTableCard({ summary, onDrill }: { summary: CeoSummary; onDrill: (view: DrillView) => void }) {
   const currency = summary.reporting_currency;
-  const window = summary.paid_by_month.slice(-12);
-  const hasUsage = window.some((row) => row.usage > 0);
+  const currentMonth = monthOf(summary.today);
+  const currentYear = summary.today.slice(0, 4);
+  const firstYear = summary.paid_items.reduce(
+    (min, item) => (item.month.slice(0, 4) < min ? item.month.slice(0, 4) : min),
+    currentYear,
+  );
+  const [year, setYear] = useState(currentYear);
 
-  const series = hasUsage
-    ? [
-        { key: 'subscriptions', name: 'Subscriptions', colour: 'var(--series-1)' },
-        { key: 'usage', name: 'Cloud usage', colour: 'var(--series-2)' },
-      ]
-    : [{ key: 'subscriptions', name: 'Subscriptions', colour: 'var(--series-1)' }];
-
-  const points = window.map((row) => ({
-    label: monthLabel(row.month),
-    // The year makes the label unique and is what the tooltip shows.
-    fullLabel: monthLabel(row.month, true),
-    values: hasUsage ? [row.subscriptions, row.usage] : [row.subscriptions],
-  }));
+  const lastMonth = year === currentYear ? Number(currentMonth.slice(5, 7)) : 12;
+  const rows = Array.from({ length: lastMonth }, (_, i) => {
+    const month = `${year}-${String(i + 1).padStart(2, '0')}`;
+    return { month, ...breakdown(itemsBetween(summary.paid_items, month, month), currency) };
+  });
+  const yearTotal = breakdown(itemsBetween(summary.paid_items, `${year}-01`, `${year}-12`), currency);
+  const max = Math.max(...rows.map((row) => row.total), 1);
+  const hasCloud = rows.some((row) => row.bill_count > 0);
 
   return (
     <section className="card">
       <div className="card-head">
-        <h2>What we paid, month by month</h2>
-        <span className="hint">complete months · click one for its payments</span>
+        <h2>Month by month</h2>
+        <span className="hint year-switch">
+          <button
+            type="button"
+            className="btn subtle sm"
+            onClick={() => setYear(String(Number(year) - 1))}
+            disabled={year <= firstYear}
+            aria-label={`Previous year, ${Number(year) - 1}`}
+          >
+            <IconChevronLeft size={14} />
+          </button>
+          <span className="year-switch-label">{year}</span>
+          <button
+            type="button"
+            className="btn subtle sm"
+            onClick={() => setYear(String(Number(year) + 1))}
+            disabled={year >= currentYear}
+            aria-label={`Next year, ${Number(year) + 1}`}
+          >
+            <IconChevronRight size={14} />
+          </button>
+        </span>
       </div>
-      <StackedColumns
-        points={points}
-        series={series}
-        currency={currency}
-        onSelect={(i) => onDrill({ kind: 'month', month: window[i]!.month })}
-      />
+
+      <div className="table-wrap">
+        <table className="month-table">
+          <thead>
+            <tr>
+              <th scope="col">Month</th>
+              <th scope="col" className="month-bar-col">
+                <span className="month-key">
+                  <span className="key-swatch" style={{ background: 'var(--series-1)' }} /> Subscriptions
+                  {hasCloud ? (
+                    <>
+                      <span className="key-swatch" style={{ background: 'var(--series-2)' }} /> Cloud
+                    </>
+                  ) : null}
+                </span>
+              </th>
+              <th scope="col" className="num">Subscriptions</th>
+              <th scope="col" className="num">Cloud</th>
+              <th scope="col" className="num">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const empty = row.items.length === 0;
+              return (
+                <tr
+                  key={row.month}
+                  className={empty ? 'is-empty' : undefined}
+                  onClick={empty ? undefined : () => onDrill({ kind: 'month', month: row.month })}
+                >
+                  <th scope="row">
+                    {empty ? (
+                      monthLabel(row.month)
+                    ) : (
+                      <button
+                        type="button"
+                        className="lead-row-button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDrill({ kind: 'month', month: row.month });
+                        }}
+                      >
+                        {monthLabel(row.month)}
+                      </button>
+                    )}
+                    {row.month === currentMonth ? <span className="cell-sub"> so far</span> : null}
+                  </th>
+                  <td className="month-bar-col" aria-hidden="true">
+                    <span className="month-bar" style={{ width: `${(row.total / max) * 100}%` }}>
+                      {row.subscriptions > 0 ? <span className="bought" style={{ flexGrow: row.subscriptions }} /> : null}
+                      {row.usage > 0 ? <span className="cloud" style={{ flexGrow: row.usage }} /> : null}
+                    </span>
+                  </td>
+                  <td className="num">{row.subscriptions > 0 ? formatMoney(row.subscriptions, currency) : '—'}</td>
+                  <td className="num">{row.usage > 0 ? formatMoney(row.usage, currency) : '—'}</td>
+                  <td className="num strong">{empty ? '—' : formatMoney(row.total, currency)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr>
+              <th scope="row">{year === currentYear ? `${year} so far` : year}</th>
+              <td className="month-bar-col" />
+              <td className="num">{formatMoney(yearTotal.subscriptions, currency)}</td>
+              <td className="num">{formatMoney(yearTotal.usage, currency)}</td>
+              <td className="num strong">{formatMoney(yearTotal.total, currency)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
     </section>
   );
 }

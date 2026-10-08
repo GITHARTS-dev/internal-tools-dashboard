@@ -11,7 +11,7 @@ import { Badge, Banner, EmptyState } from './ui';
 import { IconChevronRight } from './icons';
 import type { DrillView } from './drilldown';
 import { formatDate } from '../../shared/dates';
-import { breakdown, itemsBetween, splitYear } from '../../shared/drilldown';
+import { breakdown, itemsBetween, splitYear, type YearPart } from '../../shared/drilldown';
 import { monthOf } from '../../shared/fx';
 import { formatMoney, formatShort } from '../../shared/money';
 import type { CeoSummary } from '../../shared/types';
@@ -76,20 +76,13 @@ export function Delta({ pct }: { pct: number | null }) {
 // -------------------------------------------------------------------- lead
 
 /**
- * The headline: what has actually been spent this year, beside what the year
- * is committed to by 31 December.
+ * The headline: what was spent this year, beside what the year is committed to.
  *
- * Money already paid leads, because it is a fact; the committed total sits
- * beside it -- paid, plus the subscription bills still to come on their real
- * dates -- split so it never reads as spent. Cloud usage still to be billed is
- * not guessed at: it joins the total as each month's bill is entered.
- * (A twelve-month run rate used to stand here, and read as money already gone;
- * it is now one click into the forecast, for comparing tools.) Every figure
- * opens a drill-down into the payments, bills and prices it is made of.
- *
- * Two columns on a wide screen so it costs about 150px of height rather than
- * 300 -- it shares the top of the page with the alerts, and must not push them
- * below the fold.
+ * Two figures and one small table, and nothing to read. The left figure is a
+ * fact; the right one adds the subscription bills still to come by 31 December
+ * (cloud usage joins as it is billed -- it is never predicted). The table
+ * splits the commitment by whose money it is and how much is already paid.
+ * Every figure and row opens the drill-down it summarises.
  */
 export function SpendLead({
   summary,
@@ -101,58 +94,55 @@ export function SpendLead({
   const currency = summary.reporting_currency;
   const year = summary.today.slice(0, 4);
   const thisYear = breakdown(itemsBetween(summary.paid_items, `${year}-01`, monthOf(summary.today)), currency);
-  const currencies = thisYear.by_currency.map((line) => line.currency);
-
   const forecast = summary.year_forecast;
-  const toCome = forecast.total - forecast.paid;
   const split = splitYear(summary.paid_items, forecast);
   const last12 = summary.paid_by_month.slice(-12);
+
+  const rows: Array<{ key: 'subscriptions' | 'products'; label: string; colour: string; part: YearPart }> = [
+    { key: 'subscriptions', label: 'Subscriptions', colour: 'var(--series-1)', part: split.bought },
+    { key: 'products', label: 'Our products', colour: 'var(--series-2)', part: split.own },
+  ];
 
   return (
     <section className="lead" aria-labelledby="lead-heading">
       <div className="lead-main">
         <h2 id="lead-heading" className="lead-label">
-          Spent in {year} so far
+          Spent in {year}
         </h2>
-
         <button
           type="button"
           className="lead-figure lead-button"
           onClick={() => onDrill({ kind: 'year', year })}
-          aria-label={`Spent in ${year} so far: ${formatMoney(thisYear.total, currency)}. Open every payment and bill.`}
+          aria-label={`Spent in ${year}: ${formatMoney(thisYear.total, currency)}. Open every payment.`}
         >
           <span className="lead-value">{formatMoney(thisYear.total, currency)}</span>
-          <span className="lead-unit">
-            since 1 Jan <IconChevronRight size={13} />
-          </span>
+          <IconChevronRight size={18} className="lead-chevron" />
         </button>
 
-        <div className="lead-meta">
-          <span className="lead-rate">
-            {formatMoney(thisYear.subscriptions, currency)} on subscriptions
-            {thisYear.usage > 0 ? ` + ${formatMoney(thisYear.usage, currency)} on our products' cloud usage` : ''}
-            {currencies.length > 1 ? `, paid in ${joinWords(currencies)} and shown in ${currency}` : ''}.{' '}
-            <button type="button" className="link-button" onClick={() => onDrill({ kind: 'year', year })}>
-              See every payment
-            </button>
-          </span>
-        </div>
+        <dl className="lead-facts">
+          <div>
+            <dt>Subscriptions</dt>
+            <dd>{formatShort(thisYear.subscriptions, currency)}</dd>
+          </div>
+          <div>
+            <dt>Cloud</dt>
+            <dd>{formatShort(thisYear.usage, currency)}</dd>
+          </div>
+          {summary.comparison.trailing_12 !== null ? (
+            <div>
+              <dt>Last 12 months</dt>
+              <dd>
+                <button type="button" className="link-button strong" onClick={() => onDrill({ kind: 'last12' })}>
+                  {formatShort(summary.comparison.trailing_12, currency)}
+                </button>
+              </dd>
+            </div>
+          ) : null}
+        </dl>
 
-        {summary.comparison.trailing_12 !== null ? (
-          <p className="lead-actual">
-            Last 12 complete months:{' '}
-            <button type="button" className="link-button strong" onClick={() => onDrill({ kind: 'last12' })}>
-              <Money amount={summary.comparison.trailing_12} currency={currency} />
-            </button>
-            {/* The change against the 12 months before (<Delta pct={summary.comparison.change_pct} />) is
-                switched off for now, along with the year-on-year card. */}
-          </p>
-        ) : null}
-
-        {/* The headline arrives with a direction: the last 12 complete months. */}
         {last12.length >= 2 && last12.some((row) => row.amount > 0) ? (
           <div className="lead-trend">
-            <span className="lbl">Paid each month · click a month for its payments</span>
+            <span className="lbl">Each month · click for detail</span>
             <Sparkline
               values={last12.map((row) => row.amount)}
               labels={last12.map((row) => monthLabel(row.month, true))}
@@ -164,7 +154,7 @@ export function SpendLead({
       </div>
 
       <div className="lead-side">
-        <div className="lead-label">Committed for {year} · to 31 Dec</div>
+        <h2 className="lead-label">Committed for {year}</h2>
         <button
           type="button"
           className="forecast-figure lead-button"
@@ -172,90 +162,47 @@ export function SpendLead({
           aria-label={`Committed for ${year}: ${formatMoney(forecast.total, currency)}. Open the bills still to come.`}
         >
           <span className="forecast-value">{formatMoney(forecast.total, currency)}</span>
-          <IconChevronRight size={14} className="split-key-chevron" />
+          <IconChevronRight size={15} className="lead-chevron" />
         </button>
-        <p className="forecast-note">
-          {formatMoney(forecast.paid, currency)} paid + {formatMoney(toCome, currency)} in bills not yet paid
-          <span className="forecast-note-sub">Cloud usage counts once billed; it is not predicted.</span>
-        </p>
 
-        {/*
-          One bar for the year: blue for subscriptions we buy, orange for our own
-          products; solid for paid, pale for still to come. A segment under 0.5%
-          is not drawn -- it would be a sliver nobody could see or hover.
-        */}
-        {forecast.total > 0 ? (
-          <>
-            <div
-              className="proportion year-bar"
-              role="img"
-              aria-label={`Of ${formatMoney(forecast.total, currency)} committed: subscriptions we buy ${formatMoney(split.bought.paid, currency)} paid and ${formatMoney(split.bought.to_come, currency)} to come; our own products ${formatMoney(split.own.paid, currency)} paid and ${formatMoney(split.own.to_come, currency)} to come.`}
-            >
-              {[
-                { key: 'bp', value: split.bought.paid, className: 'bought' },
-                { key: 'bt', value: split.bought.to_come, className: 'bought is-to-come' },
-                { key: 'op', value: split.own.paid, className: 'internal' },
-                { key: 'ot', value: split.own.to_come, className: 'internal is-to-come' },
-              ]
-                .filter((seg) => seg.value / forecast.total >= 0.005)
-                .map((seg) => (
-                  <span key={seg.key} className={seg.className} style={{ flexGrow: seg.value }} />
-                ))}
-            </div>
-            <div className="year-bar-key" aria-hidden="true">
-              <span><i className="solid" /> paid</span>
-              <span><i className="pale" /> still to come</span>
-            </div>
-          </>
-        ) : null}
-
-        <div className="split-key">
-          <button
-            type="button"
-            className="split-key-item"
-            onClick={() => onDrill({ kind: 'forecast', focus: 'subscriptions' })}
-          >
-            <span className="split-key-name">
-              <span className="key-swatch" style={{ background: 'var(--series-1)' }} />
-              Subscriptions we buy
-            </span>
-            <span className="split-key-figure">
-              {formatMoney(split.bought.total, currency)}
-              <span className="split-key-sub">
-                {formatShort(split.bought.paid, currency)} paid ·{' '}
-                {formatShort(split.bought.to_come, currency)} to come
-              </span>
-            </span>
-            <IconChevronRight size={14} className="split-key-chevron" />
-          </button>
-          <button
-            type="button"
-            className="split-key-item"
-            onClick={() => onDrill({ kind: 'forecast', focus: 'products' })}
-          >
-            <span className="split-key-name">
-              <span className="key-swatch" style={{ background: 'var(--series-2)' }} />
-              Running our own products
-            </span>
-            <span className="split-key-figure">
-              {formatMoney(split.own.total, currency)}
-              <span className="split-key-sub">
-                {formatShort(split.own.paid, currency)} paid ·{' '}
-                {formatShort(split.own.to_come, currency)} to come
-              </span>
-            </span>
-            <IconChevronRight size={14} className="split-key-chevron" />
-          </button>
-        </div>
+        <table className="lead-table">
+          <thead>
+            <tr>
+              <th scope="col">
+                <span className="visually-hidden">Spend</span>
+              </th>
+              <th scope="col" className="num">Paid</th>
+              <th scope="col" className="num">To come</th>
+              <th scope="col" className="num">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.key} onClick={() => onDrill({ kind: 'forecast', focus: row.key })}>
+                <th scope="row">
+                  <button
+                    type="button"
+                    className="lead-row-button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDrill({ kind: 'forecast', focus: row.key });
+                    }}
+                  >
+                    <span className="key-swatch" style={{ background: row.colour }} />
+                    {row.label}
+                  </button>
+                </th>
+                <td className="num">{formatShort(row.part.paid, currency)}</td>
+                <td className="num">{row.part.to_come > 0 ? formatShort(row.part.to_come, currency) : '—'}</td>
+                <td className="num strong">{formatShort(row.part.total, currency)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="lead-foot">Cloud is added as each month is billed.</p>
       </div>
     </section>
   );
-}
-
-/** 'INR', 'INR and USD', 'INR, USD and EUR'. */
-function joinWords(words: string[]): string {
-  if (words.length <= 1) return words.join('');
-  return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
 }
 
 // ------------------------------------------------------------------- trend
@@ -447,8 +394,8 @@ export function CategoryCard({
 export function ProductsCard({ summary, onDrill }: { summary: CeoSummary; onDrill: (view: DrillView) => void }) {
   const currency = summary.reporting_currency;
   const year = summary.year_forecast.year;
-  // The same split the headline uses, so a product here and "Running our own
-  // products" there are the same money.
+  // The same split the headline uses, so a product here and "Our products"
+  // there are the same money.
   const byProduct = splitYear(summary.paid_items, summary.year_forecast).by_product;
 
   return (
@@ -456,120 +403,71 @@ export function ProductsCard({ summary, onDrill }: { summary: CeoSummary; onDril
       <div className="card-head">
         <h2>Our products</h2>
         <span className="hint">
-          {year} so far · <Link to="/products">Manage</Link>
+          <button type="button" className="link-button" onClick={() => onDrill({ kind: 'forecast', focus: 'products' })}>
+            {year} detail
+          </button>
+          {' · '}
+          <Link to="/products">Manage</Link>
         </span>
       </div>
 
       {summary.products.length === 0 ? (
         <EmptyState title="No internal products yet" compact>
-          Add one on the <Link to="/products">Our products</Link> screen, then attribute its
-          subscriptions to it and record what it costs each month.
+          Add one on the <Link to="/products">Our products</Link> screen.
         </EmptyState>
       ) : (
-        <div>
-          {summary.products.map((entry) => {
-            const hasUsage = entry.usage_monthly_reported !== null;
-            const fixedKnown = (entry.fixed_annual_reported ?? 0) > 0;
-            const part = byProduct.get(entry.product.id) ?? { paid: 0, to_come: 0, total: 0 };
-            // Nothing recorded on either side. Showing 0.00 here would say the
-            // product is free, when the truth is that nobody has entered its cost.
-            const unknown = !hasUsage && !fixedKnown && part.total === 0;
-            const paidPct = part.total > 0 ? (part.paid / part.total) * 100 : 0;
-            // The most recent cloud bill entered: a fact, where a yearly
-            // projection of it would be a guess.
-            const bills = summary.paid_items.filter((i) => i.kind === 'usage' && i.product_id === entry.product.id);
-            const lastMonth = bills.reduce<string | null>((max, i) => (max === null || i.month > max ? i.month : max), null);
-            const lastBill = bills.filter((i) => i.month === lastMonth).reduce((sum, i) => sum + (i.amount_reported ?? 0), 0);
-            return (
-              <div className="product-block" key={entry.product.id}>
-                <div className="product-block-head">
-                  <div style={{ minWidth: 0 }}>
-                    <div className="product-name">
-                      <Link to={`/products/${entry.product.id}`}>{entry.product.name}</Link>
-                    </div>
-                    <div className="product-meta">
-                      {entry.product.owner_name ?? 'No owner set'}
-                      {entry.product.status !== 'live' ? ` · ${entry.product.status}` : ''}
-                    </div>
-                  </div>
-                  {unknown ? (
-                    <div className="product-cost">
-                      <div className="primary" style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
-                        Not known yet
-                      </div>
-                      <div className="secondary">no cost recorded</div>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      className="product-cost product-cost-button"
-                      onClick={() => onDrill({ kind: 'forecast', focus: 'products' })}
-                      aria-label={`${entry.product.name}: ${formatMoney(part.total, currency)} committed in ${year}. See what is paid and what is still to come.`}
-                    >
-                      <div className="primary">{formatMoney(part.total, currency)}</div>
-                      <div className="secondary">
-                        committed in {year} <IconChevronRight size={11} />
-                      </div>
-                    </button>
-                  )}
-                </div>
-
-                {unknown ? null : (
-                  <>
-                    <div
-                      className="proportion year-bar"
-                      role="img"
-                      aria-label={`${formatMoney(part.paid, currency)} paid, ${formatMoney(part.to_come, currency)} still to come`}
-                    >
-                      {part.paid > 0 ? <span className="internal" style={{ flexGrow: paidPct }} /> : null}
-                      {part.to_come > 0 ? (
-                        <span className="internal is-to-come" style={{ flexGrow: 100 - paidPct }} />
+        <div className="table-wrap">
+          <table className="compact-table">
+            <thead>
+              <tr>
+                <th scope="col">Product</th>
+                <th scope="col" className="num">Spent {year}</th>
+                <th scope="col" className="num">Last cloud bill</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.products.map((entry) => {
+                const part = byProduct.get(entry.product.id);
+                // The most recent cloud bill entered: a fact, where a yearly
+                // projection of it would be a guess.
+                const bills = summary.paid_items.filter((i) => i.kind === 'usage' && i.product_id === entry.product.id);
+                const lastMonth = bills.reduce<string | null>(
+                  (max, i) => (max === null || i.month > max ? i.month : max),
+                  null,
+                );
+                const lastBill = bills
+                  .filter((i) => i.month === lastMonth)
+                  .reduce((sum, i) => sum + (i.amount_reported ?? 0), 0);
+                return (
+                  <tr key={entry.product.id}>
+                    <td>
+                      <Link className="cell-primary" to={`/products/${entry.product.id}`}>
+                        {entry.product.name}
+                      </Link>
+                      {entry.cost_entry_due ? (
+                        <div>
+                          <Badge tone="warning">{monthLabel(summary.latest_complete_month)} not entered</Badge>
+                        </div>
                       ) : null}
-                    </div>
-                    <dl className="product-stats">
-                      <div>
-                        <dt>Paid</dt>
-                        <dd>{formatShort(part.paid, currency)}</dd>
-                      </div>
-                      <div>
-                        <dt>Bills to come</dt>
-                        <dd>{formatShort(part.to_come, currency)}</dd>
-                      </div>
-                      <div>
-                        <dt>Last cloud bill</dt>
-                        <dd>
-                          {lastMonth ? (
-                            <>
-                              {formatShort(lastBill, currency)}
-                              <span> {monthLabel(lastMonth)}</span>
-                            </>
-                          ) : (
-                            <span>none yet</span>
-                          )}
-                        </dd>
-                      </div>
-                    </dl>
-                    <div className="product-meta">
-                      {entry.last_cost_month
-                        ? `Cloud counts up to ${monthLabel(entry.last_cost_month, true)}, the last bill entered; later months join as they are billed.`
-                        : 'No cloud bills entered yet.'}
-                      {entry.tool_count > 0
-                        ? ` Runs on ${entry.tool_count} ${entry.tool_count === 1 ? 'subscription' : 'subscriptions'}.`
-                        : ''}
-                    </div>
-                  </>
-                )}
-
-                {entry.cost_entry_due ? (
-                  <div>
-                    <Link to={`/products/${entry.product.id}`}>
-                      <Badge tone="warning">{monthLabel(summary.latest_complete_month, true)} costs not entered</Badge>
-                    </Link>
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
+                    </td>
+                    <td className="num">
+                      {part && part.total > 0 ? formatMoney(part.total, currency) : <span className="cell-sub">—</span>}
+                    </td>
+                    <td className="num">
+                      {lastMonth ? (
+                        <>
+                          {formatShort(lastBill, currency)}
+                          <div className="cell-sub">{monthLabel(lastMonth, true)}</div>
+                        </>
+                      ) : (
+                        <span className="cell-sub">none yet</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </section>
@@ -636,59 +534,41 @@ export function CoverageNotice({ summary }: { summary: CeoSummary }) {
     return (
       <Banner tone="warning">
         <span>
-          No exchange rates are stored yet, so anything not already in {currency} is missing from
-          these figures. <Link to="/settings">Fetch rates in Settings</Link> to complete them.
+          <strong>No exchange rates yet</strong> — amounts not in {currency} are left out.{' '}
+          <Link to="/settings">Fetch rates</Link>
         </span>
       </Banner>
     );
   }
   if (summary.gaps.length === 0) return null;
 
+  const count = summary.gaps.reduce((sum, gap) => sum + gap.count, 0);
   return (
     <Banner tone="warning">
-      <div>
-        <strong>Some amounts are missing from these figures.</strong> No exchange rate covered
-        them, so they were left out rather than guessed at.{' '}
-        <Link to="/settings">Fetch a wider range of rates</Link> to close the gap.
-        <div className="gap-list">
-          {summary.gaps.map((gap) => (
-            <Badge tone="warning" key={`${gap.currency}-${gap.month}`}>
-              {gap.currency}
-              {gap.month ? ` · ${gap.month}` : ''} · {gap.count}{' '}
-              {gap.count === 1 ? 'amount' : 'amounts'}
-            </Badge>
-          ))}
-        </div>
-      </div>
+      <span>
+        <strong>
+          {count} {count === 1 ? 'amount' : 'amounts'} left out
+        </strong>{' '}
+        — no exchange rate for{' '}
+        {summary.gaps.map((gap) => `${gap.currency}${gap.month ? ` ${gap.month}` : ''}`).join(', ')}.{' '}
+        <Link to="/settings">Fetch rates</Link>
+      </span>
     </Banner>
   );
 }
 
-/**
- * How the figures were made, as a footer.
- *
- * It stays on the dashboard because the basis of a number is part of the number
- * -- but it is a short paragraph of small type, not a section. The one table
- * that backs a chart is a click away rather than in the way.
- */
+/** How the figures are made, in two lines, with the paid-by-year table a click away. */
 export function MethodFooter({ summary, onDrill }: { summary: CeoSummary; onDrill: (view: DrillView) => void }) {
   const currency = summary.reporting_currency;
-  const first = summary.rate_months[0];
-  const lastRate = summary.rate_months[summary.rate_months.length - 1];
 
   return (
     <footer className="method">
       <p>
-        <strong>How these figures are made.</strong> Amounts not in {currency} are converted at
-        European Central Bank reference rates
-        {first && lastRate ? ` (${first} to ${lastRate})` : ''}: today&rsquo;s run rate at the
-        latest month, past payments at the month they were paid, so a closed year never changes.
-        Running cost is subscriptions, licences and cloud only — no staff time — and cloud usage is
-        entered monthly and averaged over the last three complete months, so it is an estimate. As
-        at {formatDate(summary.today)}.
+        Converted to {currency} at ECB monthly rates — each payment at the rate of its own month. Cloud
+        costs are entered monthly; staff time is not included. As at {formatDate(summary.today)}.
       </p>
       <details>
-        <summary>Paid by year, as figures</summary>
+        <summary>Paid by year</summary>
         <div className="table-wrap">
           <table>
             <thead>

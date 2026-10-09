@@ -527,32 +527,6 @@ a:not(.nav-link):not(.btn):hover { text-decoration-color: currentColor; }
 }
 .lead-foot { margin-top: 10px; font-size: 12px; color: var(--text-muted); }
 
-/*
- * Month by month: a ledger, one row per month, with a bar in each row for its
- * size -- blue for subscriptions, orange for cloud -- so the shape shows
- * without a separate chart. The total row is the headline figure.
- */
-.month-table thead th.month-bar-col { text-transform: none; letter-spacing: 0; }
-.month-key { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--text-muted); }
-.month-key .key-swatch + .key-swatch, .month-key .key-swatch:not(:first-child) { margin-left: 10px; }
-.month-table tbody th, .month-table tfoot th { text-align: left; font-weight: 500; color: var(--text-primary); white-space: nowrap; padding-right: 18px; }
-.month-table tbody th { padding-top: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--rule); }
-.month-table tbody tr:last-child th { border-bottom: none; }
-.month-table tbody tr:not(.is-empty) { cursor: pointer; }
-.month-table tbody tr.is-empty th, .month-table tbody tr.is-empty td { color: var(--text-muted); }
-.month-table tbody tr.is-empty:hover { background: none; }
-.month-table .month-bar-col { width: 40%; min-width: 120px; }
-.month-bar { display: flex; gap: 2px; height: 8px; min-width: 3px; border-radius: 99px; overflow: hidden; vertical-align: middle; }
-.month-bar span { display: block; height: 100%; }
-.month-bar .bought { background: var(--series-1); }
-.month-bar .cloud { background: var(--series-2); }
-.month-table td.strong { color: var(--text-primary); font-weight: 600; font-family: var(--disp); }
-.month-table tfoot th, .month-table tfoot td { padding: 12px 14px 2px 0; border-top: 1px solid var(--rule-strong); font-weight: 600; color: var(--text-primary); }
-.month-table tfoot td:last-child { padding-right: 0; }
-.year-switch { display: inline-flex; align-items: center; gap: 2px; }
-.year-switch-label { font-family: var(--disp); font-size: 13px; font-weight: 600; color: var(--text-primary); min-width: 40px; text-align: center; }
-@media (max-width: 720px) { .month-table .month-bar-col { display: none; } }
-
 .visually-hidden {
   position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
@@ -783,6 +757,9 @@ input[type='checkbox'] { min-width: auto; accent-color: var(--accent-mk); width:
 .tooltip .tip-total { opacity: 1; margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(128, 138, 156, 0.4); font-weight: 600; }
 .tooltip .tip-swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 7px; vertical-align: 0; }
 
+.chart .chart-target:focus { outline: none; }
+.chart .chart-target:focus-visible .mark-hit { stroke: var(--accent-mk); stroke-width: 2px; }
+.tooltip .tip-hint { margin-top: 5px; font-family: var(--mono); font-size: 10.5px; opacity: 0.7; letter-spacing: 0.02em; }
 
 /* A link that does something on this page rather than going somewhere. */
 .link-button {

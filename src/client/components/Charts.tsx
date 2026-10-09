@@ -16,6 +16,7 @@ import { formatDate } from '../../shared/dates';
  * Each chart is chosen for the question it answers, not for looking like a
  * chart:
  *
+ *   StackedColumns   which kind of spend moved, month by month
  *   CumulativeCompare are we spending more than at this point last year
  *   RenewalTimeline  what is coming, and when the cancellation window closes
  *   BarRows          where the money is concentrated, and how much of the whole
@@ -95,6 +96,17 @@ export function useTooltip() {
 }
 
 // ------------------------------------------------------------ mark shapes
+
+/** A bar rounded on its growth end only, so it stays anchored to the baseline. */
+function barPath(x: number, y: number, w: number, h: number, r: number, grow: 'right' | 'up'): string {
+  if (w <= 0 || h <= 0) return '';
+  if (grow === 'right') {
+    const radius = Math.min(r, w, h / 2);
+    return `M${x},${y} H${x + w - radius} Q${x + w},${y} ${x + w},${y + radius} V${y + h - radius} Q${x + w},${y + h} ${x + w - radius},${y + h} H${x} Z`;
+  }
+  const radius = Math.min(r, h, w / 2);
+  return `M${x},${y + h} V${y + radius} Q${x},${y} ${x + radius},${y} H${x + w - radius} Q${x + w},${y} ${x + w},${y + radius} V${y + h} Z`;
+}
 
 /** Axis ticks are landmarks, not values: no decimal places, always compact. */
 function axisTick(value: number, currency: string): string {
@@ -244,6 +256,202 @@ export function BarRows({
           })}
         </svg>
       ) : null}
+      {node}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------- stacked columns
+
+export interface StackSeries {
+  key: string;
+  name: string;
+  /** A CSS colour, normally a --series-N token. */
+  colour: string;
+}
+
+export interface StackPoint {
+  label: string;
+  fullLabel: string;
+  values: number[];
+}
+
+/**
+ * Spend by month, stacked by kind.
+ *
+ * Stacking is the honest form when the question is "what is the total, and
+ * which part of it moved". The total is what the eye reads from the top of each
+ * column; each segment's own size is what the tooltip and the end labels state.
+ * Series are labelled directly at the last column as well as in the legend, so
+ * identity never rests on colour alone.
+ */
+export function StackedColumns({
+  points,
+  series,
+  currency,
+  onSelect,
+}: {
+  points: StackPoint[];
+  series: StackSeries[];
+  currency: string;
+  /** When given, each column is a button that opens its month. */
+  onSelect?: (index: number) => void;
+}) {
+  const { show, hide, node } = useTooltip();
+  const [ref, width] = useMeasuredWidth();
+  const [hover, setHover] = useState<number | null>(null);
+
+  if (points.length === 0) return <Empty>No payments recorded yet.</Empty>;
+
+  // A gutter on the left for the axis, so its labels never sit on a column. The
+  // series are named in the legend under the chart rather than again at the
+  // right edge, which cost the plot 84px for words the legend already says.
+  const height = 216;
+  const padLeft = 46;
+  const padRight = 4;
+  const padTop = 10;
+  const padBottom = 24;
+  const plotHeight = height - padTop - padBottom;
+  const plotWidth = Math.max(0, width - padLeft - padRight);
+  const totals = points.map((p) => p.values.reduce((sum, v) => sum + v, 0));
+  const max = niceCeiling(Math.max(...totals, 1));
+  const slot = plotWidth / points.length;
+  const barWidth = Math.max(8, Math.min(38, slot - 10));
+  const ticks = [0, max / 2, max];
+  const yFor = (v: number) => padTop + plotHeight - (v / max) * plotHeight;
+
+
+  return (
+    <div ref={ref}>
+      {width > 0 ? (
+        <svg
+          className="chart"
+          height={height}
+          width={width}
+          viewBox={`0 0 ${width} ${height}`}
+          // A group rather than an image once the columns are buttons: an
+          // image's children are hidden from assistive technology.
+          role={onSelect ? 'group' : 'img'}
+          aria-label={`Amount paid per month, by kind. ${points
+            .map(
+              (p) =>
+                `${p.fullLabel}: ${series.map((s, i) => `${s.name} ${formatMoney(p.values[i] ?? 0, currency)}`).join(', ')}`,
+            )
+            .join('. ')}`}
+        >
+          {ticks.map((tick) => {
+            const y = yFor(tick);
+            return (
+              <g key={tick}>
+                <line className="gridline" x1={padLeft} x2={padLeft + plotWidth} y1={y} y2={y} />
+                <text className="axis-label" x={padLeft - 8} y={y} textAnchor="end" dominantBaseline="central">
+                  {axisTick(tick, currency)}
+                </text>
+              </g>
+            );
+          })}
+
+          {points.map((point, i) => {
+            const x = padLeft + i * slot + (slot - barWidth) / 2;
+            const dimmed = hover !== null && hover !== i;
+            let stacked = 0;
+            const lastFilled = point.values.reduce((acc, v, idx) => (v > 0 ? idx : acc), -1);
+
+            return (
+              <g
+                key={point.fullLabel}
+                opacity={dimmed ? 0.45 : 1}
+                style={{ transition: 'opacity 0.12s', cursor: onSelect ? 'pointer' : undefined }}
+                className={onSelect ? 'chart-target' : undefined}
+                {...(onSelect
+                  ? {
+                      role: 'button',
+                      tabIndex: 0,
+                      'aria-label': `${point.fullLabel}: ${formatMoney(totals[i] ?? 0, currency)} paid. Open the detail.`,
+                      onClick: () => {
+                        hide();
+                        onSelect(i);
+                      },
+                      onKeyDown: (e: React.KeyboardEvent) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onSelect(i);
+                        }
+                      },
+                      onFocus: () => setHover(i),
+                      onBlur: () => setHover(null),
+                    }
+                  : {})}
+                onMouseMove={(e) => {
+                  setHover(i);
+                  show(e, (
+                    <>
+                      <div className="tip-title">{point.fullLabel}</div>
+                      {series.map((s, si) => (
+                        <div className="tip-row" key={s.key}>
+                          <span className="tip-swatch" style={{ background: s.colour }} />
+                          {s.name} {formatMoney(point.values[si] ?? 0, currency)}
+                        </div>
+                      ))}
+                      <div className="tip-row tip-total">Total {formatMoney(totals[i] ?? 0, currency)}</div>
+                      {onSelect ? <div className="tip-hint">Click for every payment</div> : null}
+                    </>
+                  ));
+                }}
+                onMouseLeave={() => {
+                  setHover(null);
+                  hide();
+                }}
+              >
+                <rect x={padLeft + i * slot} y={padTop} width={slot} height={plotHeight} className="mark-hit" />
+                {series.map((s, si) => {
+                  const value = point.values[si] ?? 0;
+                  if (value <= 0) return null;
+                  const h = Math.max((value / max) * plotHeight, 2);
+                  const y = yFor(stacked + value);
+                  stacked += value;
+                  // Only the top segment is rounded: it is the growth end, and a
+                  // rounded join between two segments reads as a gap.
+                  const isTop = si === lastFilled;
+                  return isTop ? (
+                    <path key={s.key} d={barPath(x, y, barWidth, h, 3, 'up')} fill={s.colour} stroke="var(--chart-gap)" strokeWidth={1.5} />
+                  ) : (
+                    <rect key={s.key} x={x} y={y} width={barWidth} height={h} fill={s.colour} stroke="var(--chart-gap)" strokeWidth={1.5} />
+                  );
+                })}
+              </g>
+            );
+          })}
+
+          <line className="baseline" x1={padLeft} x2={padLeft + plotWidth} y1={padTop + plotHeight} y2={padTop + plotHeight} />
+
+          {points.map((point, i) => {
+            // Every month while there is room for it; every other one when narrow.
+            const every = slot >= 34 ? 1 : 2;
+            if (i % every !== 0 && i !== points.length - 1) return null;
+            return (
+              <text
+                key={`x-${point.fullLabel}`}
+                className="axis-label"
+                x={padLeft + i * slot + slot / 2}
+                y={height - 8}
+                textAnchor="middle"
+              >
+                {point.label}
+              </text>
+            );
+          })}
+
+        </svg>
+      ) : null}
+      <div className="legend">
+        {series.map((s) => (
+          <span className="legend-item" key={s.key}>
+            <span className="legend-swatch" style={{ background: s.colour }} />
+            {s.name}
+          </span>
+        ))}
+      </div>
       {node}
     </div>
   );

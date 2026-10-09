@@ -12,7 +12,7 @@ import {
   MethodFooter,
   ProductsCard,
   SpendLead,
-  MonthTableCard,
+  TrendCard,
 } from '../components/spend';
 import { Drilldown, useDrill } from '../components/drilldown';
 
@@ -150,17 +150,30 @@ export default function Dashboard() {
       </div>
 
       {/*
-        The month-by-month table runs full width: it is the breakdown of the
-        headline figure, row by row, and its total row is that figure. Under it,
-        the three places the money concentrates, side by side.
+        Two rows of two, each pair the same shape so the cards share a top and
+        a bottom edge: the monthly chart beside our products (the orange in the
+        chart is their cloud usage), then the two ranked lists side by side.
+        Three across left each ranked list a third of the width, which cut tool
+        names short, and stranded a near-empty products card beside them.
+
+        The trend is built only from payments marked paid, so it is left out
+        until there is one rather than drawn as an empty frame. The
+        year-on-year card (YearCompareCard in components/spend.tsx) is switched
+        off for now.
       */}
-      {summary ? <MonthTableCard summary={summary} onDrill={drill.open} /> : null}
+      {summary ? (
+        <div className="grid grid-main">
+          {summary.paid_by_month.some((row) => row.amount > 0) ? (
+            <TrendCard summary={summary} onDrill={drill.open} />
+          ) : null}
+          <ProductsCard summary={summary} onDrill={drill.open} />
+        </div>
+      ) : null}
 
       {summary ? (
-        <div className="grid grid-3">
+        <div className="grid grid-2">
           <BiggestToolsCard summary={summary} onDrill={drill.open} />
           <CategoryCard summary={summary} uncosted={uncosted} />
-          <ProductsCard summary={summary} onDrill={drill.open} />
         </div>
       ) : null}
 

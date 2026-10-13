@@ -1,4 +1,4 @@
-import { computeAlerts } from '../shared/alerts';
+import { computeAlerts, notifiableAlerts } from '../shared/alerts';
 import { paymentsToSchedule } from '../shared/schedule';
 import { isoWeekday, todayInTimezone } from '../shared/dates';
 import { changesByTool } from '../shared/prices';
@@ -32,7 +32,10 @@ export const DEFAULT_CHANNELS: Channel[] = [consoleChannel, teamsChannel, emailC
 export interface ReminderRun {
   today: IsoDate;
   timezone: string;
+  /** Everything the alert engine flags today: what the dashboard shows. */
   alerts: Alert[];
+  /** The part of `alerts` that is sent; payments are left out unless `notify_payments` is on. */
+  notified: Alert[];
   /** Payments added to the ledger by this run (or that would be, in a dry run). */
   scheduled_payments: ScheduledPayment[];
   alert_dispatch: DispatchReport;
@@ -117,12 +120,16 @@ export async function runReminders(
   const productContext = { products, costs };
 
   const alerts = computeAlerts(tools, payments, settings, today, productContext);
-  const alertDispatch = await dispatchAlerts(db, alerts, settings, env, channels, { dryRun });
+  const notified = notifiableAlerts(alerts, settings);
+  const alertDispatch = await dispatchAlerts(db, notified, settings, env, channels, { dryRun });
 
   let digestDispatch: DispatchReport | null = null;
   const isDigestDay = isoWeekday(today) === settings.digest_weekday;
   if (options.forceDigest || isDigestDay) {
-    const digestAlerts = computeAlerts(tools, payments, digestSettings(settings), today, productContext);
+    const digestAlerts = notifiableAlerts(
+      computeAlerts(tools, payments, digestSettings(settings), today, productContext),
+      settings,
+    );
     digestDispatch = await dispatchDigest(
       db,
       digestAlerts,
@@ -138,6 +145,7 @@ export async function runReminders(
     today,
     timezone: settings.timezone,
     alerts,
+    notified,
     scheduled_payments: scheduled,
     alert_dispatch: alertDispatch,
     digest_dispatch: digestDispatch,

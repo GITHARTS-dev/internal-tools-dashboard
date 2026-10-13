@@ -41,6 +41,7 @@ export default function Settings() {
       teams_webhook_url: s.teams_webhook_url,
       teams_mentions: s.teams_mentions,
       teams_mention_days: String(s.teams_mention_days),
+      notify_payments: String(s.notify_payments),
       email_from: s.email_from,
       email_to: s.email_to,
       reporting_currency: s.reporting_currency,
@@ -77,6 +78,7 @@ export default function Settings() {
         teams_webhook_url: form['teams_webhook_url'] ?? '',
         teams_mentions: form['teams_mentions'] ?? '',
         teams_mention_days: form['teams_mention_days'] || '7',
+        notify_payments: form['notify_payments'] ?? 'false',
         email_from: form['email_from'] ?? '',
         email_to: form['email_to'] ?? '',
         reporting_currency: (form['reporting_currency'] ?? 'INR').toUpperCase(),
@@ -275,6 +277,22 @@ export default function Settings() {
                 value={form['teams_mention_days'] ?? ''}
                 onChange={(e) => set('teams_mention_days', e.target.value)}
               />
+            </div>
+
+            <div className="field">
+              <label htmlFor="notify_payments">Remind about payments</label>
+              <select
+                id="notify_payments"
+                value={form['notify_payments'] ?? 'false'}
+                onChange={(e) => set('notify_payments', e.target.value)}
+              >
+                <option value="false">No: tools only (renewals, last day to cancel)</option>
+                <option value="true">Yes: also payments due and overdue</option>
+              </select>
+              <span className="help">
+                Payments are still scheduled and shown on the dashboard either way. This only
+                decides whether reminders mention them.
+              </span>
             </div>
 
             <div className="field">
@@ -896,6 +914,11 @@ function DryRunPanel() {
     }
   }
 
+  // What would actually go out, and how many flagged alerts are held back
+  // (payment reminders, when they are switched off).
+  const sent = result ? (result.notified ?? result.alerts) : [];
+  const held = result ? result.alerts.length - sent.length : 0;
+
   return (
     <section className="card">
       <div className="card-head">
@@ -925,8 +948,11 @@ function DryRunPanel() {
       {result ? (
         <div style={{ marginTop: 16 }}>
           <Banner tone="info">
-            On {formatDate(result.today)} ({result.timezone}), {result.alerts.length} alert
-            {result.alerts.length === 1 ? '' : 's'} would be computed.
+            On {formatDate(result.today)} ({result.timezone}), {sent.length}{' '}
+            {sent.length === 1 ? 'reminder' : 'reminders'} would be sent.
+            {held > 0
+              ? ` ${held} payment ${held === 1 ? 'reminder is' : 'reminders are'} not sent: switched off under “Remind about payments”.`
+              : ''}
           </Banner>
 
           {result.scheduled_payments && result.scheduled_payments.length > 0 ? (
@@ -959,10 +985,10 @@ function DryRunPanel() {
           </div>
 
           <div style={{ marginTop: 14 }}>
-            {result.alerts.length === 0 ? (
+            {sent.length === 0 ? (
               <EmptyState title="Nothing would be sent that day" />
             ) : (
-              result.alerts.map((alert) => <AlertRow key={alert.dedupe_key} alert={alert} />)
+              sent.map((alert) => <AlertRow key={alert.dedupe_key} alert={alert} />)
             )}
           </div>
         </div>

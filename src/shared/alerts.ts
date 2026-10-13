@@ -334,6 +334,19 @@ export function computeAlerts(
   return sortAlerts(alerts);
 }
 
+/** Payment reminders, which are only sent when `notify_payments` is on. */
+const PAYMENT_RULES = new Set<AlertRule>(['payment_due_soon', 'payment_overdue']);
+
+/**
+ * What goes out in Teams, email and the weekly digest, as opposed to what is
+ * flagged. The dashboard always shows every alert; the messages leave payments
+ * out unless `notify_payments` is on, because a tool's renewal reminder already
+ * covers the day it costs money.
+ */
+export function notifiableAlerts(alerts: Alert[], settings: AppSettings): Alert[] {
+  return settings.notify_payments ? alerts : alerts.filter((alert) => !PAYMENT_RULES.has(alert.rule));
+}
+
 /** Most urgent first: by severity, then by how soon, then by name. */
 export function sortAlerts(alerts: Alert[]): Alert[] {
   return [...alerts].sort((a, b) => {

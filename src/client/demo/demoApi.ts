@@ -13,7 +13,7 @@
  */
 
 import snapshot from './data.json';
-import { computeAlerts } from '../../shared/alerts';
+import { computeAlerts, notifiableAlerts } from '../../shared/alerts';
 import {
   computeCategorySpend,
   computeKpis,
@@ -146,6 +146,7 @@ function settings(): AppSettings {
       rawSettings['reporting_currency'] || DEFAULT_SETTINGS.reporting_currency
     ).toUpperCase(),
     fx_auto_refresh: rawSettings['fx_auto_refresh'] !== 'false',
+    notify_payments: rawSettings['notify_payments'] === 'true',
     aws_default_product_id: rawSettings['aws_default_product_id'] ?? '',
     aws_cost_tag_key: rawSettings['aws_cost_tag_key'] ?? '',
   };
@@ -496,28 +497,30 @@ export const demoApi = {
         }
       : current;
     const alerts = computeAlerts(tools, payments, effective, today, { products: internalProducts, costs: productCosts });
+    const notified = notifiableAlerts(alerts, current);
 
     return reply({
       today,
       timezone: current.timezone,
       alerts,
+      notified,
       dry_run: true,
       alert_dispatch: {
         considered: alerts.length,
-        notifiable: alerts.length,
+        notifiable: notified.length,
         channels: [
           {
             channel: 'console',
             status: 'skipped',
             detail: 'dry run: nothing sent or recorded',
-            new_alerts: alerts.length,
-            alert_titles: alerts.map((a) => a.title),
+            new_alerts: notified.length,
+            alert_titles: notified.map((a) => a.title),
           },
           {
             channel: 'teams',
             status: 'skipped',
             detail: current.teams_webhook_url ? 'dry run: nothing sent or recorded' : 'not configured',
-            new_alerts: current.teams_webhook_url ? alerts.length : 0,
+            new_alerts: current.teams_webhook_url ? notified.length : 0,
             alert_titles: [],
           },
           {

@@ -41,7 +41,10 @@ function failingChannel(name = 'flaky'): Channel {
 
 beforeEach(async () => {
   ({ db } = testDb());
-  await updateSettings(db, { timezone: 'Asia/Kolkata' });
+  // Most of this file tests how reminders are sent, using an overdue payment as
+  // the example, so payment reminders are switched on here. Their being off by
+  // default is tested on its own below.
+  await updateSettings(db, { timezone: 'Asia/Kolkata', notify_payments: 'true' });
 });
 
 function toolInput(name = 'Some tool') {
@@ -319,6 +322,66 @@ describe('weekly digest', () => {
     const digest = channel.sent.find((p) => p.kind === 'digest');
     expect(digest?.alerts.some((a) => a.tool_name === 'Figma')).toBe(true);
     expect(run.digest_dispatch).not.toBeNull();
+  });
+});
+
+describe('payment reminders, off by default', () => {
+  /** An overdue payment, and a tool renewing in 7 days: one of each kind. */
+  async function seedBoth() {
+    await updateSettings(db, { notify_payments: 'false' });
+    await seedOverduePayment();
+    await createTool(db, {
+      name: 'Adobe CC',
+      category: 'Design',
+      status: 'active',
+      owner_name: 'Meera',
+      billing_cycle: 'annual',
+      cost_amount: 5000000,
+      currency: 'INR',
+      renewal_date: '2026-09-25',
+      auto_renew: true,
+      cancellation_notice_days: 0,
+    } as never);
+  }
+
+  it('sends the renewal but not the payment, while the dashboard still flags both', async () => {
+    await seedBoth();
+    const channel = recordingChannel();
+    const run = await runReminders(db, env, { today: '2026-09-18', channels: [channel] });
+
+    // Flagged: what the dashboard shows.
+    expect(run.alerts.some((a) => a.rule === 'payment_overdue')).toBe(true);
+    // Sent: tools only.
+    const sent = channel.sent.flatMap((p) => p.alerts);
+    expect(sent.some((a) => a.rule === 'renewal_upcoming' && a.tool_name === 'Adobe CC')).toBe(true);
+    expect(sent.some((a) => a.rule === 'payment_overdue' || a.rule === 'payment_due_soon')).toBe(false);
+    expect(run.notified.every((a) => a.rule !== 'payment_overdue')).toBe(true);
+  });
+
+  it('leaves payments out of the weekly digest too', async () => {
+    await seedBoth();
+    const channel = recordingChannel();
+    await runReminders(db, env, { today: '2026-09-21', channels: [channel] }); // a Monday
+
+    const digest = channel.sent.find((p) => p.kind === 'digest');
+    expect(digest?.alerts.some((a) => a.tool_name === 'Adobe CC')).toBe(true);
+    expect(digest?.alerts.some((a) => a.rule.startsWith('payment_'))).toBe(false);
+  });
+
+  it('sends nothing for a payment alone', async () => {
+    await updateSettings(db, { notify_payments: 'false' });
+    await seedOverduePayment();
+    const channel = recordingChannel();
+    await runReminders(db, env, { today: '2026-09-18', channels: [channel] });
+    expect(channel.sent).toHaveLength(0);
+  });
+
+  it('sends payments again once switched back on', async () => {
+    await seedBoth();
+    await updateSettings(db, { notify_payments: 'true' });
+    const channel = recordingChannel();
+    await runReminders(db, env, { today: '2026-09-18', channels: [channel] });
+    expect(channel.sent.flatMap((p) => p.alerts).some((a) => a.rule === 'payment_overdue')).toBe(true);
   });
 });
 

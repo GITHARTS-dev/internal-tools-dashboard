@@ -113,6 +113,8 @@ export interface ReminderRunResponse {
   today: string;
   timezone: string;
   alerts: Alert[];
+  /** The part of `alerts` that is sent: payments are left out unless switched on in Settings. */
+  notified?: Alert[];
   /** Payments the run added to the ledger, or would add in a dry run. */
   scheduled_payments?: Array<{ tool_id: string; tool_name: string; due_date: string; amount: number; currency: string }>;
   dry_run: boolean;

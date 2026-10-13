@@ -40,7 +40,7 @@ Reminder delivery is coded and unproven: no Teams channel or webhook URL exists 
 
 ## Product Principles
 1. Surface what needs action before what is merely interesting.
-2. One definition of "needs attention", shared by screen and reminders.
+2. One definition of "needs attention", shared by screen and reminders. The reminders send the tool side of it -- renewals, cancel-by dates, missing details, cloud costs not entered -- and leave payments out by default (Settings, "Remind about payments"), because a tool's renewal reminder already covers the day it costs money. The dashboard always shows everything.
 3. History is never lost; the ledger outlives the subscription.
 4. Money is exact and shown in its original currency; it is converted only where a common currency is needed, at the payment month's rate, and always labelled as converted.
 5. Serve the admin's daily work first; make the CEO's view a clear read-only summary of the same data.

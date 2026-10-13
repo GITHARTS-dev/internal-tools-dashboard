@@ -187,6 +187,14 @@ export interface AppSettings {
   /** Whether the daily job may fetch fresh ECB rates on its own. */
   fx_auto_refresh: boolean;
   /**
+   * Whether reminders (Teams, email, the weekly digest) include payments due and
+   * overdue. Off by default: renewals and cancel-by dates already say when a tool
+   * costs money, so a payment reminder for the same date was a second message
+   * about one event. Payments are still scheduled, tracked and shown on the
+   * dashboard either way -- this only governs what is sent.
+   */
+  notify_payments: boolean;
+  /**
    * The product the AWS bill is recorded against: all of it when no tag key is
    * set, otherwise whatever spend carries no tag matching a product.
    */
@@ -211,6 +219,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   email_to: '',
   reporting_currency: 'INR',
   fx_auto_refresh: true,
+  notify_payments: false,
   aws_default_product_id: '',
   aws_cost_tag_key: '',
 };

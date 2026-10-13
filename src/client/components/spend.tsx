@@ -379,10 +379,6 @@ export function ProductsCard({ summary, onDrill }: { summary: CeoSummary; onDril
       <div className="card-head">
         <h2>Our products</h2>
         <span className="hint">
-          <button type="button" className="link-button" onClick={() => onDrill({ kind: 'forecast', focus: 'products' })}>
-            {year} detail
-          </button>
-          {' · '}
           <Link to="/products">Manage</Link>
         </span>
       </div>
@@ -427,7 +423,18 @@ export function ProductsCard({ summary, onDrill }: { summary: CeoSummary; onDril
                       ) : null}
                     </td>
                     <td className="num">
-                      {part && part.total > 0 ? formatMoney(part.total, currency) : <span className="cell-sub">—</span>}
+                      {part && part.paid > 0 ? (
+                        <button
+                          type="button"
+                          className="link-button strong"
+                          onClick={() => onDrill({ kind: 'year', year, focus: 'products' })}
+                          aria-label={`${formatMoney(part.paid, currency)} spent in ${year}. Open the payments.`}
+                        >
+                          {formatMoney(part.paid, currency)}
+                        </button>
+                      ) : (
+                        <span className="cell-sub">—</span>
+                      )}
                     </td>
                     <td className="num">
                       {lastMonth ? (

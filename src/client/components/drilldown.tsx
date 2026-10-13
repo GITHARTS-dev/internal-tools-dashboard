@@ -59,8 +59,10 @@ function dateRange(from: string, to: string): string {
 // ------------------------------------------------------------------ state
 
 export type DrillView =
-  | { kind: 'year'; year: string }
-  | { kind: 'month'; month: string }
+  // A year or month can be narrowed to one side of the split, and stays narrowed
+  // as you step through it: "Paid" in Our products opens only their payments.
+  | { kind: 'year'; year: string; focus?: Focus }
+  | { kind: 'month'; month: string; focus?: Focus }
   | { kind: 'last12' }
   | { kind: 'forecast'; focus: Focus }
   | { kind: 'runrate'; focus: Focus };
@@ -77,9 +79,9 @@ function inFocus(focus: Focus, productId: string | null): boolean {
 export function viewKey(view: DrillView): string {
   switch (view.kind) {
     case 'year':
-      return `year:${view.year}`;
+      return `year:${view.year}${view.focus && view.focus !== 'all' ? `:${view.focus}` : ''}`;
     case 'month':
-      return `month:${view.month}`;
+      return `month:${view.month}${view.focus && view.focus !== 'all' ? `:${view.focus}` : ''}`;
     case 'last12':
       return 'last12';
     case 'forecast':
@@ -93,10 +95,10 @@ export function parseView(raw: string | null): DrillView | null {
   if (raw === 'last12') return { kind: 'last12' };
   const split = /^(forecast|runrate)(?::(subscriptions|products))?$/.exec(raw);
   if (split) return { kind: split[1] as 'forecast' | 'runrate', focus: (split[2] as Focus | undefined) ?? 'all' };
-  const year = /^year:(\d{4})$/.exec(raw);
-  if (year) return { kind: 'year', year: year[1]! };
-  const month = /^month:(\d{4}-(0[1-9]|1[0-2]))$/.exec(raw);
-  if (month) return { kind: 'month', month: month[1]! };
+  const year = /^year:(\d{4})(?::(subscriptions|products))?$/.exec(raw);
+  if (year) return { kind: 'year', year: year[1]!, focus: (year[2] as Focus | undefined) ?? 'all' };
+  const month = /^month:(\d{4}-(?:0[1-9]|1[0-2]))(?::(subscriptions|products))?$/.exec(raw);
+  if (month) return { kind: 'month', month: month[1]!, focus: (month[2] as Focus | undefined) ?? 'all' };
   return null;
 }
 
@@ -367,7 +369,12 @@ export function Drilldown({ summary }: { summary: CeoSummary }) {
     </>
   );
 
+  /** "Spent in 2026", or "Our products, spent in 2026" when narrowed. */
+  const titled = (focus: Focus | undefined, name: string) =>
+    focus === 'products' ? `Our products · ${name}` : focus === 'subscriptions' ? `Subscriptions · ${name}` : name;
+
   if (view.kind === 'month') {
+    const focus = view.focus ?? 'all';
     const earliest = summary.paid_items.reduce(
       (min, item) => (item.month < min ? item.month : min),
       addMonthsToYearMonth(currentMonth, -23),
@@ -379,19 +386,19 @@ export function Drilldown({ summary }: { summary: CeoSummary }) {
         summary={summary}
         from={view.month}
         to={view.month}
-        title={longMonth(view.month)}
+        focus={focus}
+        title={titled(focus, longMonth(view.month))}
         subtitle={view.month === currentMonth ? `So far, to ${formatDate(summary.today)}` : undefined}
         onClose={close}
         onOpenMonth={null}
         nav={arrows(
-          { label: `Previous month, ${longMonth(prev)}`, go: () => swap({ kind: 'month', month: prev }), disabled: prev < earliest },
-          { label: `Next month, ${longMonth(next)}`, go: () => swap({ kind: 'month', month: next }), disabled: next > currentMonth },
+          { label: `Previous month, ${longMonth(prev)}`, go: () => swap({ kind: 'month', month: prev, focus }), disabled: prev < earliest },
+          { label: `Next month, ${longMonth(next)}`, go: () => swap({ kind: 'month', month: next, focus }), disabled: next > currentMonth },
         )}
       />
     );
   }
 
-  const openMonth = (month: string) => swap({ kind: 'month', month });
 
   if (view.kind === 'last12') {
     const from = summary.comparison.from ?? addMonthsToYearMonth(currentMonth, -12);
@@ -401,14 +408,16 @@ export function Drilldown({ summary }: { summary: CeoSummary }) {
         summary={summary}
         from={from}
         to={to}
+        focus="all"
         title="Last 12 months"
         subtitle={`${shortMonth(from)} – ${shortMonth(to)}`}
         onClose={close}
-        onOpenMonth={openMonth}
+        onOpenMonth={(month) => swap({ kind: 'month', month })}
       />
     );
   }
 
+  const focus = view.focus ?? 'all';
   const isCurrent = view.year === currentYear;
   const from = `${view.year}-01`;
   return (
@@ -416,19 +425,20 @@ export function Drilldown({ summary }: { summary: CeoSummary }) {
       summary={summary}
       from={from}
       to={isCurrent ? currentMonth : `${view.year}-12`}
-      title={`Spent in ${view.year}`}
+      focus={focus}
+      title={titled(focus, `Spent in ${view.year}`)}
       subtitle={isCurrent ? dateRange(`${view.year}-01-01`, summary.today) : undefined}
       onClose={close}
-      onOpenMonth={openMonth}
+      onOpenMonth={(month) => swap({ kind: 'month', month, focus })}
       nav={arrows(
         {
           label: `Previous year, ${Number(view.year) - 1}`,
-          go: () => swap({ kind: 'year', year: String(Number(view.year) - 1) }),
-          disabled: !summary.paid_items.some((item) => item.month < from),
+          go: () => swap({ kind: 'year', year: String(Number(view.year) - 1), focus }),
+          disabled: !summary.paid_items.some((item) => item.month < from && inFocus(focus, item.product_id)),
         },
         {
           label: `Next year, ${Number(view.year) + 1}`,
-          go: () => swap({ kind: 'year', year: String(Number(view.year) + 1) }),
+          go: () => swap({ kind: 'year', year: String(Number(view.year) + 1), focus }),
           disabled: view.year >= currentYear,
         },
       )}
@@ -442,6 +452,7 @@ function PaidSheet({
   summary,
   from,
   to,
+  focus,
   title,
   subtitle,
   onClose,
@@ -451,6 +462,7 @@ function PaidSheet({
   summary: CeoSummary;
   from: string;
   to: string;
+  focus: Focus;
   title: string;
   subtitle?: string;
   onClose: () => void;
@@ -459,13 +471,15 @@ function PaidSheet({
   nav?: ReactNode;
 }) {
   const target = summary.reporting_currency;
-  const data = breakdown(itemsBetween(summary.paid_items, from, to), target);
+  const data = breakdown(
+    itemsBetween(summary.paid_items, from, to).filter((item) => inFocus(focus, item.product_id)),
+    target,
+  );
 
-  const stats: Stat[] = [
-    { label: 'Total', value: formatMoney(data.total, target) },
-    { label: 'Subscriptions', value: formatMoney(data.subscriptions, target) },
-  ];
-  // Only when bills were entered: a zero here would read as "free", not "none recorded".
+  const stats: Stat[] = [{ label: 'Total', value: formatMoney(data.total, target) }];
+  // Each part only when something of that kind was paid: a zero would read as
+  // "free", not "none recorded".
+  if (data.payment_count > 0) stats.push({ label: 'Subscriptions', value: formatMoney(data.subscriptions, target) });
   if (data.bill_count > 0) stats.push({ label: 'Cloud', value: formatMoney(data.usage, target) });
 
   return (
@@ -599,11 +613,11 @@ function MonthRows({
 
 // -------------------------------------------------------------- committed
 
-/** The panel title for the whole commitment, or one side of the split. */
-const FOCUS_TITLE: Record<Focus, string> = {
-  all: 'Committed for',
-  subscriptions: 'Subscriptions,',
-  products: 'Our products,',
+/** The panel title's prefix when narrowed to one side of the split; titles read "Our products · Committed for 2026". */
+const FOCUS_PREFIX: Record<Focus, string> = {
+  all: '',
+  subscriptions: 'Subscriptions · ',
+  products: 'Our products · ',
 };
 
 function CommittedSheet({
@@ -636,7 +650,7 @@ function CommittedSheet({
 
   const stats: Stat[] = [
     { label: 'Total', value: formatMoney(paid + overdue + coming, target) },
-    { label: 'Paid', value: formatMoney(paid, target), onClick: () => onSwap({ kind: 'year', year }) },
+    { label: 'Paid', value: formatMoney(paid, target), onClick: () => onSwap({ kind: 'year', year, focus }) },
   ];
   if (overdue > 0) stats.push({ label: 'Overdue', value: formatMoney(overdue, target), tone: 'critical' });
   stats.push({ label: 'To come', value: formatMoney(coming, target) });
@@ -650,7 +664,7 @@ function CommittedSheet({
 
   return (
     <Sheet
-      title={`${FOCUS_TITLE[focus]} ${year}`}
+      title={`${FOCUS_PREFIX[focus]}Committed for ${year}`}
       subtitle={`Paid so far + bills due by 31 Dec · cloud is added as it is billed`}
       onClose={onClose}
     >
